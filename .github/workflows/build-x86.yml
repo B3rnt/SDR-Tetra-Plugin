@@ -1,0 +1,37 @@
+name: Build SDR-Tetra-Plugin (x86) + Artifact
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+
+jobs:
+  build-x86:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "5.0.x"
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build (Release | x86)
+        run: dotnet build -c Release -p:Platform=x86 --no-restore
+
+      - name: Prepare artifact folder
+        run: |
+          mkdir artifact
+          xcopy /E /I /Y **\bin\Release\* artifact\
+          xcopy /Y lib\native\x86\tetravoicedec.dll artifact\
+
+      - name: Upload full artifact (x86)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SDR-Tetra-Plugin_x86_full
+          path: artifact
