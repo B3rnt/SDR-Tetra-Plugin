@@ -25,10 +25,27 @@ jobs:
         run: dotnet build -c Release -p:Platform=x86 --no-restore
 
       - name: Prepare artifact folder
+        shell: pwsh
         run: |
-          mkdir artifact
-          xcopy /E /I /Y **\bin\Release\* artifact\
-          xcopy /Y lib\native\x86\tetravoicedec.dll artifact\
+          New-Item -ItemType Directory -Force artifact | Out-Null
+
+          # Copy all build outputs
+          $outDirs = Get-ChildItem -Path . -Recurse -Directory |
+            Where-Object { $_.FullName -match '\\bin\\Release\\' }
+
+          foreach ($d in $outDirs) {
+            Copy-Item -Path (Join-Path $d.FullName '*') -Destination artifact -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+          # Copy ALL required dlls you placed here (SDR# SDK dlls + tetravoicedec.dll)
+          if (Test-Path "lib\native\x86") {
+            Copy-Item -Path "lib\native\x86\*" -Destination artifact -Recurse -Force
+          } else {
+            Write-Error "Expected folder lib/native/x86 not found. Please add it to the repo."
+          }
+
+          # Show what will be uploaded
+          Get-ChildItem -Path artifact | Format-Table Name, Length
 
       - name: Upload full artifact (x86)
         uses: actions/upload-artifact@v4
