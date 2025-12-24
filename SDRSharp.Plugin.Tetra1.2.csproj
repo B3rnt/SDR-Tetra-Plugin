@@ -8,6 +8,7 @@
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <AssemblyName>SDRSharp.Plugin.Tetra</AssemblyName>
     <RootNamespace>SDRSharp.Plugin.Tetra</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
