@@ -29,7 +29,7 @@ namespace SDRSharp.Tetra
         private const int ChannelActiveDelay = 10;
 
         private ISharpControl _controlInterface;
-        private IFProcessor _ifProcessor;
+        private SharedStreamHub _streamHub;
         private Demodulator _demodulator;
         private TetraDecoder _decoder;
 
@@ -65,7 +65,7 @@ namespace SDRSharp.Tetra
 
         private bool _needDisplayBufferUpdate;
 
-        private AudioProcessor _audioProcessor;
+        // Stream data comes from SharedStreamHub (single SDR# hook), not per-panel hooks.
 
         private bool _showInfo;
         private bool _needCloseInfo;
@@ -85,6 +85,8 @@ namespace SDRSharp.Tetra
         private int _activeCounter4;
 
         private NetInfoWindow _infoWindow;
+
+        private double _lastIqSampleRate;
 
         private List<ReceivedData> _rawData = new List<ReceivedData>();
         private List<ReceivedData> _cmceData = new List<ReceivedData>();
@@ -131,15 +133,7 @@ namespace SDRSharp.Tetra
 
         // UI elements created at runtime (so we don't have to touch the designer)
         private Button _lockFrequencyButton;
-        private Label _lockFrequencyStatusLabel;
-        private Button _newInstanceButton;
-
-        // Keep unique instance numbers for extra windows created from within the GUI.
-        private static int _windowInstanceCounter;
-
-        private readonly int _instanceNumber;
-
-        private const int CallTimeout = 10;
+        private Label _lockFrequencyStatusLabel;        private const int CallTimeout = 10;
         private int _currentChPriority;
 
         #region Init and store settings
@@ -150,13 +144,6 @@ namespace SDRSharp.Tetra
                 InitializeComponent();
 
                 InitArrays();
-
-                _instanceNumber = instanceNumber;
-                // Ensure UI-created instances won't collide with existing plugin instance numbers.
-                if (_windowInstanceCounter < _instanceNumber)
-                {
-                    _windowInstanceCounter = _instanceNumber;
-                }
 
                 _settingsPersister = new SettingsPersister("tetraSettings_" + instanceNumber + ".xml");
                 _tetraSettings = _settingsPersister.ReadStored();
@@ -197,15 +184,11 @@ namespace SDRSharp.Tetra
                 _infoWindow = new NetInfoWindow();
                 _infoWindow.FormClosing += _infoWindow_FormClosing;
 
-                _ifProcessor = new IFProcessor();
-                // Use wideband IQ so we can decode a fixed (locked) frequency even when the main VFO moves.
-                // AuxVFO does the same by registering ProcessorType 0.
-                _controlInterface.RegisterStreamHook(_ifProcessor, (ProcessorType)0);
-                _ifProcessor.IQReady += IQSamplesAvailable;
-
-                _audioProcessor = new AudioProcessor();
-                _controlInterface.RegisterStreamHook(_audioProcessor, ProcessorType.DemodulatorOutput);
-                _audioProcessor.AudioReady += AudioSamplesNedeed;
+                // IMPORTANT: do NOT register stream hooks per window. That can freeze SDR#'s waterfall.
+                // Instead, subscribe to a shared hub that registers hooks exactly once.
+                _streamHub = SharedStreamHub.GetOrCreate(_controlInterface);
+                _streamHub.IQReady += IQSamplesAvailable;
+                _streamHub.AudioReady += AudioSamplesNedeed;
 
                 _decoder = new TetraDecoder(this);
                 _decoder.DataReady += _decoder_DataReady;
@@ -259,35 +242,27 @@ namespace SDRSharp.Tetra
                 _lockFrequencyButton.Click += LockFrequencyButton_Click;
                 groupBox2.Controls.Add(_lockFrequencyButton);
 
+                _lockOutOfRangeLabel = new Label
+                {
+                    AutoSize = true,
+                    Location = new Point(14, 118),
+                    Text = ""
+                };
+                groupBox2.Controls.Add(_lockOutOfRangeLabel);
+
                 _lockFrequencyStatusLabel = new Label
                 {
                     AutoSize = true,
                     Location = new Point(14, 100),
                     Text = "Lock: uit"
                 };
-                groupBox2.Controls.Add(_lockFrequencyStatusLabel);
-
-                // Spawn an extra "instance" from the GUI.
-                // This opens a new window with its own decoder chain and its own settings file.
-                _newInstanceButton = new Button
-                {
-                    Text = "Nieuwe instance",
-                    Width = 125,
-                    Height = 23,
-                    Location = new Point(85, 122),
-                    Anchor = AnchorStyles.Top | AnchorStyles.Right
-                };
-                _newInstanceButton.Click += NewInstanceButton_Click;
-                groupBox2.Controls.Add(_newInstanceButton);
-
-                UpdateLockUi();
+                groupBox2.Controls.Add(_lockFrequencyStatusLabel);UpdateLockUi();
             }
             catch
             {
                 // If the host SDR# version has a different designer layout, we simply skip the extra UI.
             }
         }
-
         private void LockFrequencyButton_Click(object sender, EventArgs e)
         {
             // Toggle lock: first click locks to current selected frequency; second click unlocks.
@@ -304,56 +279,50 @@ namespace SDRSharp.Tetra
             UpdateLockUi();
         }
 
-        private void NewInstanceButton_Click(object sender, EventArgs e)
+private void UpdateLockUi()
+{
+    try
+    {
+        if (_lockFrequencyStatusLabel == null || _lockFrequencyButton == null)
         {
-            try
-            {
-                var newInstanceNumber = Interlocked.Increment(ref _windowInstanceCounter);
-
-                var panel = new TetraPanel(_controlInterface, newInstanceNumber)
-                {
-                    Dock = DockStyle.Fill
-                };
-
-                var form = new Form
-                {
-                    Text = $"TETRA Demodulator (instance {newInstanceNumber})",
-                    StartPosition = FormStartPosition.CenterScreen,
-                    Width = Math.Max(800, panel.Width),
-                    Height = Math.Max(600, panel.Height)
-                };
-
-                form.Controls.Add(panel);
-                form.FormClosing += (s, args) =>
-                {
-                    try { panel.SaveSettings(); } catch { }
-                    try { panel.Dispose(); } catch { }
-                };
-
-                form.Show();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Kon geen nieuwe instance openen: " + ex.Message);
-            }
+            return;
         }
 
-        private void UpdateLockUi()
+        if (_frequencyLocked)
         {
-            if (_lockFrequencyStatusLabel == null || _lockFrequencyButton == null)
-                return;
+            _lockFrequencyStatusLabel.Text = string.Format(CultureInfo.InvariantCulture,
+                "Lock: aan ({0:0.000000} MHz)", _lockedFrequency / 1e6);
+            _lockFrequencyButton.Text = "Unlock";
+        }
+        else
+        {
+            _lockFrequencyStatusLabel.Text = "Lock: uit";
+            _lockFrequencyButton.Text = "Kies deze frequentie";
+        }
 
-            if (_frequencyLocked)
+        if (_lockOutOfRangeLabel != null)
+        {
+            if (_frequencyLocked && _lastIqSampleRate > 0)
             {
-                _lockFrequencyStatusLabel.Text = "Lock: " + string.Format("{0:0,0.000###} MHz", _lockedFrequency * 0.000001m);
-                _lockFrequencyButton.Text = "Unlock";
+                var center = _controlInterface.CenterFrequency;
+                var half = _lastIqSampleRate / 2.0;
+                var offset = Math.Abs(_lockedFrequency - center);
+                _lockOutOfRangeLabel.Text = (offset > half)
+                    ? "⚠ Buiten band (verhoog samplerate of retune center)"
+                    : string.Empty;
             }
             else
             {
-                _lockFrequencyStatusLabel.Text = "Lock: uit";
-                _lockFrequencyButton.Text = "Kies deze frequentie";
+                _lockOutOfRangeLabel.Text = string.Empty;
             }
         }
+    }
+    catch
+    {
+        // ignore UI update failures
+    }
+}
+
 
         private long GetTargetFrequencyHz()
         {
@@ -606,6 +575,7 @@ namespace SDRSharp.Tetra
         /// <param name="length"></param>
         public unsafe void IQSamplesAvailable(Complex* samples, double samplerate, int length)
         {
+            _lastIqSampleRate = samplerate;
             this._iqSamplerate = samplerate;
             if (this._radioFifoBuffer == null)
                 this._radioFifoBuffer = new ComplexFifoStream(BlockMode.None);
