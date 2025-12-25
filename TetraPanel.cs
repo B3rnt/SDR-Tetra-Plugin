@@ -122,6 +122,19 @@ namespace SDRSharp.Tetra
         private UnsafeBuffer _diBitsBuffer;
         private unsafe byte* _diBitsBufferPtr;
 
+        // --- Frequency lock (AuxVFO-style) ---
+        // When enabled, the plugin keeps decoding on _lockedFrequency by
+        // digitally shifting the wideband IQ stream.
+        private bool _frequencyLocked;
+        private long _lockedFrequency;
+        private double _ncoPhase;
+        private double _ncoStep;
+        private double _ncoSampleRate;
+
+        // UI elements created at runtime (so we don't have to touch the designer)
+        private Button _lockFrequencyButton;
+        private Label _lockFrequencyStatusLabel;
+
         private const int CallTimeout = 10;
         private int _currentChPriority;
 
@@ -162,11 +175,17 @@ namespace SDRSharp.Tetra
 
                 _controlInterface = control;
 
+                // Add a simple "Kies deze frequentie" button like AuxVFO.
+                // This locks the plugin on the currently selected frequency.
+                CreateFrequencyLockUi();
+
                 _infoWindow = new NetInfoWindow();
                 _infoWindow.FormClosing += _infoWindow_FormClosing;
 
                 _ifProcessor = new IFProcessor();
-                _controlInterface.RegisterStreamHook(_ifProcessor, ProcessorType.DecimatedAndFilteredIQ);
+                // Use wideband IQ so we can decode a fixed (locked) frequency even when the main VFO moves.
+                // AuxVFO does the same by registering ProcessorType 0.
+                _controlInterface.RegisterStreamHook(_ifProcessor, (ProcessorType)0);
                 _ifProcessor.IQReady += IQSamplesAvailable;
 
                 _audioProcessor = new AudioProcessor();
@@ -204,6 +223,126 @@ namespace SDRSharp.Tetra
             {
                 _currentCellLoad[i] = new CurrentLoad();
             }
+        }
+
+        private void CreateFrequencyLockUi()
+        {
+            try
+            {
+                // The designer contains a "label11" placeholder that isn't used for decoding.
+                // Hide it so we can place our controls without editing the .Designer.cs.
+                label11.Visible = false;
+
+                _lockFrequencyButton = new Button
+                {
+                    Text = "Kies deze frequentie",
+                    Width = 125,
+                    Height = 23,
+                    Location = new Point(85, 95),
+                    Anchor = AnchorStyles.Top | AnchorStyles.Right
+                };
+                _lockFrequencyButton.Click += LockFrequencyButton_Click;
+                groupBox2.Controls.Add(_lockFrequencyButton);
+
+                _lockFrequencyStatusLabel = new Label
+                {
+                    AutoSize = true,
+                    Location = new Point(14, 100),
+                    Text = "Lock: uit"
+                };
+                groupBox2.Controls.Add(_lockFrequencyStatusLabel);
+
+                UpdateLockUi();
+            }
+            catch
+            {
+                // If the host SDR# version has a different designer layout, we simply skip the extra UI.
+            }
+        }
+
+        private void LockFrequencyButton_Click(object sender, EventArgs e)
+        {
+            // Toggle lock: first click locks to current selected frequency; second click unlocks.
+            if (_frequencyLocked)
+            {
+                _frequencyLocked = false;
+            }
+            else
+            {
+                _lockedFrequency = _controlInterface.Frequency;
+                _frequencyLocked = true;
+                ResetDecoder();
+            }
+            UpdateLockUi();
+        }
+
+        private void UpdateLockUi()
+        {
+            if (_lockFrequencyStatusLabel == null || _lockFrequencyButton == null)
+                return;
+
+            if (_frequencyLocked)
+            {
+                _lockFrequencyStatusLabel.Text = "Lock: " + string.Format("{0:0,0.000###} MHz", _lockedFrequency * 0.000001m);
+                _lockFrequencyButton.Text = "Unlock";
+            }
+            else
+            {
+                _lockFrequencyStatusLabel.Text = "Lock: uit";
+                _lockFrequencyButton.Text = "Kies deze frequentie";
+            }
+        }
+
+        private long GetTargetFrequencyHz()
+        {
+            return _frequencyLocked ? _lockedFrequency : _controlInterface.Frequency;
+        }
+
+        private int GetBurstSamples(double sampleRate)
+        {
+            // We need enough IQ samples to cover one TETRA burst (255 symbols) at the current sample rate.
+            // Add a small safety margin.
+            var n = (int)Math.Round((sampleRate / 18000.0) * BurstLengthSymbols * 1.15);
+            return Math.Max(512, n);
+        }
+
+        private unsafe void FrequencyTranslate(Complex* buffer, int length, double sampleRate, long targetFrequency)
+        {
+            // Translate the chosen (locked) frequency to baseband (0 Hz) based on the current spectrum center.
+            // If CenterFrequency isn't available, fall back to Frequency.
+            long center;
+            try { center = _controlInterface.CenterFrequency; }
+            catch { center = _controlInterface.Frequency; }
+
+            var offsetHz = (double)(targetFrequency - center);
+
+            if (_ncoSampleRate != sampleRate)
+            {
+                _ncoSampleRate = sampleRate;
+                _ncoPhase = 0;
+            }
+
+            // exp(-j*2*pi*offset/sampleRate)
+            var step = -TwoPi * (float)(offsetHz / sampleRate);
+
+            float phase = (float)_ncoPhase;
+            for (int i = 0; i < length; i++)
+            {
+                var c = buffer[i];
+                var cs = (float)Math.Cos(phase);
+                var sn = (float)Math.Sin(phase);
+
+                // complex multiply: c * (cs + j*sn)
+                var re = c.Real * cs - c.Imag * sn;
+                var im = c.Real * sn + c.Imag * cs;
+                buffer[i].Real = re;
+                buffer[i].Imag = im;
+
+                phase += step;
+                if (phase > TwoPi) phase -= TwoPi;
+                else if (phase < -TwoPi) phase += TwoPi;
+            }
+            _ncoPhase = phase;
         }
 
         private Dictionary<int, NetworkEntry> NetworkBaseDeserializer(List<GroupsEntries> list)
@@ -290,10 +429,11 @@ namespace SDRSharp.Tetra
                     break;
 
                 case "Frequency":
-                    if (!_isAfcWork)
-                    {
+                    // If we're frequency-locked we keep decoding on the locked carrier;
+                    // don't hard-reset the decoder on every VFO movement.
+                    if (!_frequencyLocked && !_isAfcWork)
                         ResetDecoder();
-                    }
+
                     _isAfcWork = false;
                     break;
 
@@ -481,7 +621,9 @@ namespace SDRSharp.Tetra
          */
         private unsafe void DecodingThread()
         {
-            _iqBuffer = UnsafeBuffer.Create(SamplesPerBurst, sizeof(Complex));
+            // Allocate dynamically based on actual samplerate.
+            var burstSamples = GetBurstSamples(_iqSamplerate == 0 ? 25000 : _iqSamplerate);
+            _iqBuffer = UnsafeBuffer.Create(burstSamples, sizeof(Complex));
             _iqBufferPtr = (Complex*)_iqBuffer;
 
             _symbolsBuffer = UnsafeBuffer.Create(BurstLengthSymbols, sizeof(float));
@@ -500,7 +642,22 @@ namespace SDRSharp.Tetra
             };
             while (this._decodingIsStarted)
             {
-                if ((_radioFifoBuffer == null) || (_radioFifoBuffer.Length < SamplesPerBurst) || (_iqSamplerate == 0))
+                if (_iqSamplerate == 0)
+                {
+                    Thread.Sleep(10);
+                    continue;
+                }
+
+                burstSamples = GetBurstSamples(_iqSamplerate);
+
+                // Re-allocate IQ buffer if samplerate changed and we now need more/less samples per burst.
+                if (_iqBuffer == null || _iqBuffer.Length != burstSamples)
+                {
+                    _iqBuffer = UnsafeBuffer.Create(burstSamples, sizeof(Complex));
+                    _iqBufferPtr = (Complex*)_iqBuffer;
+                }
+
+                if ((_radioFifoBuffer == null) || (_radioFifoBuffer.Length < burstSamples))
                 {
                     Thread.Sleep(10);
                     continue;
@@ -516,8 +673,12 @@ namespace SDRSharp.Tetra
                 ///BurstLengthBits -> 510
                 ///Con 1024 no encuentra los paquetes!!!
 
-                this._radioFifoBuffer.Read(this._iqBufferPtr, BurstLengthBits);
-                this._demodulator.ProcessBuffer(burst, this._iqBufferPtr, this._iqSamplerate, BurstLengthBits, this._symbolsBufferPtr);
+                this._radioFifoBuffer.Read(this._iqBufferPtr, burstSamples);
+
+                // Digitally tune to either the locked frequency or the current selected frequency.
+                FrequencyTranslate(this._iqBufferPtr, burstSamples, this._iqSamplerate, GetTargetFrequencyHz());
+
+                this._demodulator.ProcessBuffer(burst, this._iqBufferPtr, this._iqSamplerate, burstSamples, this._symbolsBufferPtr);
                 /// END CRITICAL
 
                 if (burst.Type == BurstType.WaitBurst)
@@ -1086,6 +1247,7 @@ namespace SDRSharp.Tetra
                 mainFrequencyLinkLabel.Text = string.Format("{0:0,0.000###} MHz", _mainCell_Frequency * 0.000001m);
                 currentCarrierLabel.Text = _currentCell_Carrier.ToString();
                 currentFrequencyLabel.Text = string.Format("{0:0,0.000###} MHz", _controlInterface.Frequency * 0.000001m);
+                UpdateLockUi();
             }
         }
 
