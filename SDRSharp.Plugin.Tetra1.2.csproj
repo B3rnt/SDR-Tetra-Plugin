@@ -55,4 +55,10 @@
     </Reference>
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Avoid duplicate type definitions if older files are present in the repo -->
+    <Compile Remove="Rules.cs" />
+    <Compile Remove="RulesType.cs" />
+  </ItemGroup>
+
 </Project>

@@ -297,7 +297,6 @@ namespace SDRSharp.Tetra
         T5_el_length_ex,
 
         // --- Mobility Management (MM) ---
-        MM_PDU_Type,
         Authentication_sub_type,
         Location_update_accept_type,
         Location_update_type,
