@@ -311,9 +311,8 @@ namespace SDRSharp.Tetra
         CCK_identifier,
         Reject_cause,
 
-                Cipher_control,
-        Ciphering_parameters,
-        MM_Address_extension,
+	                Cipher_control,
+	        Ciphering_parameters,
         Location_update_type,
         Group_identity_report,
         Group_identity_acknowledgement_request,
