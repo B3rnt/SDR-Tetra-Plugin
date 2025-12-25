@@ -5,6 +5,9 @@ namespace SDRSharp.Tetra
         public int? LocationArea;
         public int? Ssi;
         public int? Gssi;
+        public int? CckIdentifier;
+        public string AuthText;
+        public string LuTypeText;
         public string Message;
     }
 }

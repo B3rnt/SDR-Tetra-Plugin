@@ -1,7 +1,7 @@
 namespace SDRSharp.Tetra
 {
-    // MM PDU types (4-bit)
-    public enum MmPduType
+    // MM PDU type mapping (4 bits) – matches the reference SDRtetra project.
+    internal enum MmPduType
     {
         D_OTAR = 0,
         D_AUTHENTICATION = 1,
