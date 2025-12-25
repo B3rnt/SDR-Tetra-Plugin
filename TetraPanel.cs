@@ -122,7 +122,10 @@ namespace SDRSharp.Tetra
         private int _afcCounter;
         private double _freqError;
         private float _averageAngle;
-        private bool _isAfcWork;
+        // AFC correction is applied internally (digital tuning) so we never retune
+        // SDR# itself. Retuning SDR# (changing control.Frequency) causes the
+        // waterfall/FFT to jump and makes frequencies unreliable.
+        private double _afcCorrectionHz;
         private Mode _tetraMode;
         private UnsafeBuffer _diBitsBuffer;
         private unsafe byte* _diBitsBufferPtr;
@@ -369,7 +372,8 @@ private void UpdateLockUi()
             try { center = _controlInterface.CenterFrequency; }
             catch { center = _controlInterface.Frequency; }
 
-            var offsetHz = (double)(targetFrequency - center);
+            // Include AFC correction (internal only)
+            var offsetHz = (double)(targetFrequency - center) + _afcCorrectionHz;
 
             if (_ncoSampleRate != sampleRate)
             {
@@ -488,8 +492,9 @@ private void UpdateLockUi()
                 case "Frequency":
                     // Do not follow SDR# frequency changes. The channel uses its own
                     // internal target frequency (selected/locked).
-                    // We only clear AFC state here.
-                    _isAfcWork = false;
+                    // We only clear AFC accumulators here.
+                    _afcCounter = 0;
+                    _averageAngle = 0;
                     break;
 
                 case "DetectorType":
@@ -503,6 +508,9 @@ private void UpdateLockUi()
             _resetCounter = 10;
 
             _freqError = 0;
+            _afcCorrectionHz = 0;
+            _afcCounter = 0;
+            _averageAngle = 0;
 
             _currentCell_NMI = 0;
             _currentCell_MNC = 0;
@@ -567,12 +575,23 @@ private void UpdateLockUi()
             // Do NOT change SDR# global demodulator/tuning settings here.
             // Doing so makes the waterfall/jumps and makes frequency readouts unreliable.
             // We do our own internal tuning (frequency translation) per channel.
-            // We only require that SDR# is running and providing IQ.
-            this._controlInterface.StartRadio();
+            // We only require that SDR# is already running and providing IQ.
+            // Calling StartRadio() here can restart parts of SDR# and cause visible
+            // jumps in the waterfall / frequency display.
+
+            if (_lastIqSampleRate == 0)
+            {
+                MessageBox.Show(
+                    "Start the radio first (press Play) and make sure IQ is flowing before enabling the TETRA demodulator channel.",
+                    "TETRA plugin",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return false;
+            }
 
             // We no longer own the IFProcessor (it lives in SharedStreamHub), so we can't rely
             // on its SampleRate property here. Instead, use the incoming IQ samplerate.
-            if (_lastIqSampleRate != 0 && _lastIqSampleRate < 25000)
+            if (_lastIqSampleRate < 25000)
             {
                 if (System.Globalization.CultureInfo.CurrentCulture.Name == "ru-RU")
                 {
@@ -665,7 +684,8 @@ private void UpdateLockUi()
                 _decodingThread.Join();
                 _decodingThread = null;
             }
-            _controlInterface.AudioIsMuted = false;
+            // Do not touch SDR# global audio state from the plugin.
+            // In multi-channel mode this can cause DSP/UI chain reconfiguration.
         }
 
         /**
@@ -1160,7 +1180,7 @@ private void UpdateLockUi()
                 _mainCell_Frequency = Global.FrequencyCalc(isFull, carrier, band, offset);
                 _mainCell_Carrier = carrier;
 
-                _currentCell_Carrier = Global.CarrierCalc(_controlInterface.Frequency);
+                _currentCell_Carrier = Global.CarrierCalc(GetTargetFrequencyHz());
             }
         }
 
@@ -1285,7 +1305,7 @@ private void UpdateLockUi()
                 }
             }
 
-            _controlInterface.AudioIsMuted = !(_channel1Listen || _channel2Listen || _channel3Listen || _channel4Listen);
+            // Do not change SDR# global audio mute state.
 
             if (_decoder != null)
             {
@@ -1805,8 +1825,9 @@ private void UpdateLockUi()
             {
                 if (_freqError > 200 || _freqError < -200)
                 {
-                    _isAfcWork = true;
-                    _controlInterface.Frequency += (long)_freqError;
+                    // Apply AFC internally by adjusting the digital mixer offset.
+                    // Never retune SDR# itself here (would make waterfall jump).
+                    _afcCorrectionHz += _freqError;
                     _freqError = 0;
                 }
             }
