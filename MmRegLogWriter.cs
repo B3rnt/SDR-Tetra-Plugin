@@ -20,7 +20,8 @@ namespace SDRSharp.Tetra
             if (!Global.LogMmRegistrations) return;
             if (info == null || string.IsNullOrEmpty(info.Message)) return;
 
-            int la = info.LocationArea ?? -1;
+                        int la = -1;
+            received.TryGetValue(GlobalNames.Location_Area, ref la);
             int ssi = info.Ssi ?? -1;
 
             string time = TimeSpan.FromMilliseconds(_sw.ElapsedMilliseconds).ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);

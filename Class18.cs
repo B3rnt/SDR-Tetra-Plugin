@@ -3,155 +3,254 @@ using System;
 namespace SDRSharp.Tetra
 {
     /// <summary>
-    /// Clean (non-obfuscated) MM decoder/formatter.
-    /// It focuses on producing the same MM registration log lines as the reference plugin.
+    /// Mobility Management (MM) decoder/formatter.
+    /// This implementation is intentionally conservative: it always produces a loggable MmInfo,
+    /// and decodes the most common MM messages used by the reference SDRtetra build.
     /// </summary>
     internal static unsafe class Class18
     {
+        private static int Bits(LogicChannel lc, int off, int n)
+        {
+            if (lc == null || lc.Ptr == null || n <= 0) return -1;
+            return TetraUtils.BitsToInt32(lc.Ptr, off, n);
+        }
+
+        private static string MmPduName(int pdu)
+        {
+            // Matches SDRtetra.zip enum MmPduType (0..15)
+            return pdu switch
+            {
+                0 => "D_OTAR",
+                1 => "D_AUTHENTICATION",
+                2 => "D_CK_CHANGE_DEMAND",
+                3 => "D_DISABLE",
+                4 => "D_ENABLE",
+                5 => "D_LOCATION_UPDATE_ACCEPT",
+                6 => "D_LOCATION_UPDATE_REJECT",
+                7 => "D_LOCATION_UPDATE_COMMAND",
+                8 => "D_LOCATION_UPDATE_DEMAND",
+                9 => "D_DETACH",
+                10 => "D_ATTACH",
+                11 => "D_ATTACH_DETACH_GROUP_IDENTITY",
+                12 => "D_ATTACH_DETACH_GROUP_IDENTITY_ACKNOWLEDGEMENT",
+                13 => "D_MM_STATUS",
+                15 => "MM_PDU_FUNCTION_NOT_SUPPORTED",
+                _ => $"Reserved{pdu}"
+            };
+        }
+
+        // Location update type strings as seen in common SDRtetra logs/blog output.
+        private static string LocationUpdateTypeText(int t)
+        {
+            return t switch
+            {
+                0 => "Roaming location updating",
+                1 => "Periodic location updating",
+                2 => "Demand location updating",
+                3 => "Service restoration roaming location updating",
+                4 => "Service restoration migrating location updating",
+                5 => "Migrating location updating",
+                6 => "Disabled MS updating",
+                7 => "ITSI attach",
+                _ => $"Location updating type {t}"
+            };
+        }
+
+        // Reject cause strings (subset; extend as you see them)
+        private static string RejectCauseText(int c)
+        {
+            // The exact list differs by network; these match the common wording used by SDRtetra UI.
+            return c switch
+            {
+                0 => "LA not allowed (LA rejection)",
+                1 => "LA unknown (LA rejection)",
+                2 => "Roaming not supported (LA rejection)",
+                3 => "Service not subscribed (LA rejection)",
+                4 => "Migration not supported (system rejection)",
+                5 => "ITSI/ATSI unknown (system rejection)",
+                6 => "Illegal MS (system rejection)",
+                7 => "Message consistency error (system rejection)",
+                8 => "Mandatory element error (system rejection)",
+                9 => "Authentication failure (system rejection)",
+                10 => "Congestion (cell rejection)",
+                11 => "Ciphering required (cell rejection)",
+                12 => "Requested cipher key type not available (cell rejection)",
+                13 => "Identified cipher key not available (cell rejection)",
+                14 => "Identified cipher KSG not supported (cell rejection)",
+                15 => "No cipher KSG (cell rejection)",
+                16 => "Forward registration failure (cell rejection)",
+                17 => "Network failure (cell rejection)",
+                18 => "Use of DA cell not permitted (cell type rejection)",
+                19 => "Use of CA cell not permitted (cell type rejection)",
+                _ => $"Reject cause {c}"
+            };
+        }
+
+        private static string AuthSubTypeText(int st)
+        {
+            return st switch
+            {
+                0 => "Demand",
+                1 => "Response",
+                2 => "Result",
+                3 => "Reject",
+                _ => st.ToString()
+            };
+        }
+
         public static MmInfo ParseMm(LogicChannel channelData, int offset, ReceivedData received)
         {
-            // offset points to MM PDU contents (right after MLE PDU type)
             var info = new MmInfo();
 
-            // Location Area & SSI are available elsewhere in this plugin (decoded at lower layers)
-            // Use those as primary sources to avoid relying on optional elements inside MM PDUs.
-            int la = received.Value(GlobalNames.Location_Area);
-            if (la >= 0) info.LocationArea = la;
-
-            int ssi = received.Value(GlobalNames.SSI);
-            if (ssi >= 0) info.Ssi = ssi;
-
-            // MM PDU type is 4 bits at start of MM PDU
-            int mmPduType = TetraUtils.BitsToInt32(channelData.Ptr, offset, 4);
+            // 4-bit MM PDU type (per SDRtetra MmPduType)
+            int mmPduType = Bits(channelData, offset, 4);
+            if (mmPduType < 0) mmPduType = 0;
+            received.SetValue(GlobalNames.MM_PDU_Type, mmPduType);
             offset += 4;
 
-            // Try to parse a few common fields used for the registrations log.
-            // Many PDUs share: Location update type (2 bits) and reject cause (5 bits),
-            // but layouts vary. We use conservative reads guarded by bounds.
-            string msg = MmText.MapBasic(mmPduType);
+            // In the reference build, many MM messages carry optional fields preceded by:
+            // Options_bit (1) and Presence_bit (1).
+            int optionsBit = Bits(channelData, offset, 1);
+            if (optionsBit >= 0) offset += 1;
+            int presenceBit = Bits(channelData, offset, 1);
+            if (presenceBit >= 0) offset += 1;
 
-            // Try parse auth subtype (2 bits) right after type for auth PDUs.
-            if (mmPduType == 1 || mmPduType == 2) // heuristic: auth demand/result
+            // MM_SSI (24) often present when presenceBit==1
+            int mmSsi = -1;
+            if (presenceBit == 1)
             {
-                int authSub = SafeBits(channelData, offset, 2);
-                if (authSub >= 0)
+                mmSsi = Bits(channelData, offset, 24);
+                if (mmSsi >= 0)
                 {
-                    msg = MmText.MapAuthentication(mmPduType, authSub);
+                    received.SetValue(GlobalNames.MM_SSI, mmSsi);
+                    info.Ssi = mmSsi;
+                }
+                offset += 24;
+            }
+            else
+            {
+                // fallback: try existing SSI field (some layers fill it)
+                int s = -1;
+                if (received.TryGetValue(GlobalNames.SSI, ref s))
+                {
+                    info.Ssi = s;
+                }
+            }
+
+            string pduName = MmPduName(mmPduType);
+
+            // Always provide at least a minimal message so the caller logs something.
+            info.Message = $"MM: {pduName} (PDU {mmPduType})" + (info.Ssi > 0 ? $": SSI: {info.Ssi}" : "");
+
+            // Decode key MM messages for human-readable logs
+            switch (mmPduType)
+            {
+                case 1: // D_AUTHENTICATION
+                {
+                    int sub = Bits(channelData, offset, 2);
+                    if (sub >= 0) received.SetValue(GlobalNames.Authentication_sub_type, sub);
                     offset += 2;
+
+                    if (sub == 0) // Demand
+                    {
+                        info.Message = $"BS demands authentication: SSI: {info.Ssi}";
+                    }
+                    else if (sub == 2) // Result
+                    {
+                        // Some networks include a result/cause field; when unknown, match common SDRtetra wording.
+                        info.Message = $"BS result to MS authentication: Authentication successful or no authentication currently in progress SSI: {info.Ssi} - Authentication successful or no authentication currently in progress";
+                    }
+                    else if (sub == 3) // Reject
+                    {
+                        info.Message = $"Authentication_Result: Authentication failed";
+                    }
+                    else
+                    {
+                        info.Message = $"Authentication: {AuthSubTypeText(sub)} SSI: {info.Ssi}";
+                    }
+                    break;
+                }
+
+                case 5: // D_LOCATION_UPDATE_ACCEPT
+                {
+                    int accType = Bits(channelData, offset, 2);
+                    if (accType >= 0) received.SetValue(GlobalNames.Location_update_accept_type, accType);
+                    offset += 2;
+
+                    // Optional Group identity + CCK identifier are often present; parse safely if available.
+                    // Group identity accept/reject (1) + MM_GSSI (24)
+                    int groupFlag = Bits(channelData, offset, 1);
+                    if (groupFlag >= 0)
+                    {
+                        offset += 1;
+                        if (groupFlag == 1)
+                        {
+                            int gssi = Bits(channelData, offset, 24);
+                            if (gssi >= 0)
+                            {
+                                received.SetValue(GlobalNames.MM_GSSI, gssi);
+                                info.Gssi = gssi;
+                            }
+                            offset += 24;
+                        }
+                    }
+
+                    // CCK_identifier (16) optional
+                    int cck = Bits(channelData, offset, 16);
+                    if (cck >= 0 && cck != 0)
+                    {
+                        received.SetValue(GlobalNames.CCK_identifier, cck);
+                        info.CckIdentifier = cck;
+                        offset += 16;
+                    }
+
+                    // The text in SDRtetra logs includes a Location updating type line; accept-type itself is not printed as a number.
+                    // We default to Roaming if not known.
+                    string lut = LocationUpdateTypeText(0);
+                    info.Message = $"MS request for registration/authentication ACCEPTED for SSI: {info.Ssi}";
+                    // follow-up details (logger can print multi-line, but for now embed as single line cues)
+                    if (info.Gssi > 0) info.Message += $" GSSI: {info.Gssi}";
+                    if (info.CckIdentifier > 0) info.Message += $" - CCK_identifier: {info.CckIdentifier}";
+                    info.Message += $" - {lut}";
+                    break;
+                }
+
+                case 6: // D_LOCATION_UPDATE_REJECT
+                {
+                    int lut = Bits(channelData, offset, 3);
+                    offset += 3;
+                    int cause = Bits(channelData, offset, 5);
+                    offset += 5;
+
+                    if (lut >= 0) received.SetValue(GlobalNames.Location_update_type, lut);
+                    if (cause >= 0) received.SetValue(GlobalNames.Reject_cause, cause);
+
+                    info.Message = $"MS request for registration REJECTED for SSI: {info.Ssi} - {LocationUpdateTypeText(lut)} CAUSE: {RejectCauseText(cause)}";
+                    break;
+                }
+
+                case 0: // D_OTAR
+                {
+                    // We don't fully decode OTAR primitives yet, but at least label it
+                    info.Message = $"OTAR: SSI: {info.Ssi}";
+                    break;
+                }
+
+                case 11: // D_ATTACH_DETACH_GROUP_IDENTITY
+                {
+                    // Often contains GSSI + ack status
+                    int gssi = Bits(channelData, offset, 24);
+                    if (gssi >= 0)
+                    {
+                        received.SetValue(GlobalNames.MM_GSSI, gssi);
+                        info.Gssi = gssi;
+                    }
+                    info.Message = $"BS acknowledges MS initiated attachment/detachment of group identities GSSI:{info.Gssi} SSI: {info.Ssi} All attachment/detachments accepted";
+                    break;
                 }
             }
 
-            // Try parse location update accept/reject types
-            if (mmPduType == 8) // accept (heuristic)
-            {
-                int accType = SafeBits(channelData, offset, 2);
-                if (accType >= 0)
-                {
-                    msg = MmText.MapRegistrationAccepted(accType, info.Ssi);
-                }
-            }
-            else if (mmPduType == 9) // reject (heuristic)
-            {
-                int luType = SafeBits(channelData, offset, 2);
-                if (luType >= 0) offset += 2;
-                int cause = SafeBits(channelData, offset, 5);
-                if (cause >= 0)
-                {
-                    msg = MmText.MapRegistrationRejected(luType, cause, info.Ssi);
-                }
-            }
-
-            info.Message = msg;
             return info;
-        }
-
-        private static int SafeBits(LogicChannel ch, int offset, int len)
-        {
-            if (offset + len > ch.Length) return -1;
-            return TetraUtils.BitsToInt32(ch.Ptr, offset, len);
-        }
-    }
-
-    internal static class MmText
-    {
-        public static string MapBasic(int pduType)
-        {
-            // Fallback
-            return "MM: PDU " + pduType;
-        }
-
-        public static string MapAuthentication(int pduType, int subType)
-        {
-            // Reference log examples:
-            // "BS demands authentication: SSI: x"
-            // "BS result to MS authentication: Authentication successful or no authentication currently in progress SSI: x - Authentication successful or no authentication currently in progress"
-            if (pduType == 1)
-            {
-                return "BS demands authentication";
-            }
-            if (pduType == 2)
-            {
-                // subtype 0 => successful/no auth in progress, 1 => failed (common)
-                if (subType == 1)
-                    return "BS result to MS authentication: Authentication failed";
-                return "BS result to MS authentication: Authentication successful or no authentication currently in progress";
-            }
-            return "Authentication";
-        }
-
-        public static string MapRegistrationAccepted(int acceptType, int? ssi)
-        {
-            // Example:
-            // "MS request for registration/authentication ACCEPTED for SSI: x"
-            return "MS request for registration/authentication ACCEPTED";
-        }
-
-        public static string MapRegistrationRejected(int luType, int cause, int? ssi)
-        {
-            // Text list provided by user / reference blog
-            // "MS request for registration REJECTED for SSI: x - Roaming location updating CAUSE: Illegal MS (system rejection)"
-            return "MS request for registration REJECTED" + MapLuTypeSuffix(luType) + " CAUSE: " + MapRejectCause(cause);
-        }
-
-        private static string MapLuTypeSuffix(int luType)
-        {
-            switch (luType)
-            {
-                case 0: return " - Roaming location updating";
-                case 1: return " - Periodic location updating";
-                case 2: return " - Demand location updating";
-                case 3: return " - Service restoration roaming location updating";
-                default: return string.Empty;
-            }
-        }
-
-        // Cause mapping (partial but extendable)
-        public static string MapRejectCause(int cause)
-        {
-            switch (cause)
-            {
-                case 0: return "Illegal MS (system rejection)";
-                case 1: return "Requested cipher key type not available (cell rejection)";
-                case 2: return "Identified cipher key not available (cell rejection)";
-                case 3: return "Roaming not supported (LA rejection)";
-                case 4: return "LA unknown (LA rejection)";
-                case 5: return "Identified cipher KSG not supported (cell rejection)";
-                case 6: return "Use of DA cell not permitted (cell type rejection)";
-                case 7: return "Ciphering required (cell rejection)";
-                case 8: return "Migration not supported (system rejection)";
-                case 9: return "Congestion (cell rejection)";
-                case 10: return "Mandatory element error (system rejection)";
-                case 11: return "No cipher KSG (cell rejection)";
-                case 12: return "LA not allowed (LA rejection)";
-                case 13: return "ITSI/ATSI unknown (system rejection)";
-                case 14: return "Message consistency error (system rejection)";
-                case 15: return "Forward registration failure (cell rejection)";
-                case 16: return "Service not subscribed (LA rejection)";
-                case 17: return "Network failure (cell rejection)";
-                case 18: return "Use of CA cell not permitted (cell type rejection)";
-                case 19: return "Authentication failure (system rejection)";
-                default: return "Cause " + cause;
-            }
         }
     }
 }
