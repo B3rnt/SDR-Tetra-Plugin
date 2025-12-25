@@ -29,10 +29,8 @@
     <Compile Update="Display.cs" />
     <Compile Update="NetInfoWindow.cs" />
     <Compile Update="TetraPanel.cs" />
-    <ItemGroup>
     <Compile Remove="Rules.cs" />
     <Compile Remove="RulesType.cs" />
-  </ItemGroup>
 
 </ItemGroup>
 
