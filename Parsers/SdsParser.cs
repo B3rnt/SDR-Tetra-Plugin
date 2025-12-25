@@ -338,10 +338,9 @@ namespace SDRSharp.Tetra
                     break;
 
                 default:
-                    break;
                     result.Add(GlobalNames.UnknowData, 1);
                     return;
-            }
+}
 
             Decoder dec = encTable.GetDecoder();
             var messageLength = (channelData.Length - offset) / symbLength;

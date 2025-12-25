@@ -988,5 +988,12 @@ namespace SDRSharp.Tetra
         public int UdpPort { get; set; }
 
         public bool AfcDisabled { get; set; }
+
+        // Frequency lock (persisted)
+        public bool FrequencyLocked { get; set; }
+
+        // Locked frequency in Hz
+        public long LockedFrequency { get; set; }
+
     }
 }

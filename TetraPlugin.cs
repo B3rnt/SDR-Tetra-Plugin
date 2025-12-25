@@ -1,5 +1,6 @@
 ﻿using SDRSharp.Common;
 using System.Windows.Forms;
+using System.Threading;
 
 namespace SDRSharp.Tetra
 {
@@ -8,6 +9,8 @@ namespace SDRSharp.Tetra
         private const string _displayName = "TETRA Demodulator";
         private ISharpControl _controlInterface;
         private TetraPanel _qpskPanel;
+        private static int _pluginInstanceCounter;
+        private int _instanceNumber;
 
         public UserControl Gui
         {
@@ -23,7 +26,8 @@ namespace SDRSharp.Tetra
         {
             System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
             _controlInterface = control;
-            _qpskPanel = new TetraPanel(_controlInterface);
+            _instanceNumber = Interlocked.Increment(ref _pluginInstanceCounter);
+            _qpskPanel = new TetraPanel(_controlInterface, _instanceNumber);
         }
 
         public void Close()

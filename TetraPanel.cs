@@ -127,19 +127,23 @@ namespace SDRSharp.Tetra
         // digitally shifting the wideband IQ stream.
         private bool _frequencyLocked;
         private long _lockedFrequency;
-        private double _ncoPhase;
-        private double _ncoStep;
-        private double _ncoSampleRate;
+        private double _ncoPhase;        private double _ncoSampleRate;
 
         // UI elements created at runtime (so we don't have to touch the designer)
         private Button _lockFrequencyButton;
         private Label _lockFrequencyStatusLabel;
+        private Button _newInstanceButton;
+
+        // Keep unique instance numbers for extra windows created from within the GUI.
+        private static int _windowInstanceCounter;
+
+        private readonly int _instanceNumber;
 
         private const int CallTimeout = 10;
         private int _currentChPriority;
 
         #region Init and store settings
-        public unsafe TetraPanel(ISharpControl control)
+        public unsafe TetraPanel(ISharpControl control, int instanceNumber)
         {
             try
             {
@@ -147,10 +151,21 @@ namespace SDRSharp.Tetra
 
                 InitArrays();
 
-                _settingsPersister = new SettingsPersister("tetraSettings.xml");
+                _instanceNumber = instanceNumber;
+                // Ensure UI-created instances won't collide with existing plugin instance numbers.
+                if (_windowInstanceCounter < _instanceNumber)
+                {
+                    _windowInstanceCounter = _instanceNumber;
+                }
+
+                _settingsPersister = new SettingsPersister("tetraSettings_" + instanceNumber + ".xml");
                 _tetraSettings = _settingsPersister.ReadStored();
 
-                #region Default Settings
+                
+                // Restore persisted frequency lock state
+                _frequencyLocked = _tetraSettings.FrequencyLocked;
+                _lockedFrequency = _tetraSettings.LockedFrequency;
+#region Default Settings
                 if (_tetraSettings.LogEntryRules == null || _tetraSettings.LogEntryRules == string.Empty)
                     _tetraSettings.LogEntryRules = DefaultLogEntryRules;
 
@@ -252,6 +267,19 @@ namespace SDRSharp.Tetra
                 };
                 groupBox2.Controls.Add(_lockFrequencyStatusLabel);
 
+                // Spawn an extra "instance" from the GUI.
+                // This opens a new window with its own decoder chain and its own settings file.
+                _newInstanceButton = new Button
+                {
+                    Text = "Nieuwe instance",
+                    Width = 125,
+                    Height = 23,
+                    Location = new Point(85, 122),
+                    Anchor = AnchorStyles.Top | AnchorStyles.Right
+                };
+                _newInstanceButton.Click += NewInstanceButton_Click;
+                groupBox2.Controls.Add(_newInstanceButton);
+
                 UpdateLockUi();
             }
             catch
@@ -274,6 +302,40 @@ namespace SDRSharp.Tetra
                 ResetDecoder();
             }
             UpdateLockUi();
+        }
+
+        private void NewInstanceButton_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var newInstanceNumber = Interlocked.Increment(ref _windowInstanceCounter);
+
+                var panel = new TetraPanel(_controlInterface, newInstanceNumber)
+                {
+                    Dock = DockStyle.Fill
+                };
+
+                var form = new Form
+                {
+                    Text = $"TETRA Demodulator (instance {newInstanceNumber})",
+                    StartPosition = FormStartPosition.CenterScreen,
+                    Width = Math.Max(800, panel.Width),
+                    Height = Math.Max(600, panel.Height)
+                };
+
+                form.Controls.Add(panel);
+                form.FormClosing += (s, args) =>
+                {
+                    try { panel.SaveSettings(); } catch { }
+                    try { panel.Dispose(); } catch { }
+                };
+
+                form.Show();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Kon geen nieuwe instance openen: " + ex.Message);
+            }
         }
 
         private void UpdateLockUi()
@@ -415,6 +477,8 @@ namespace SDRSharp.Tetra
             if (_processIsStarted) StopDecoding();
             _tetraSettings.AutoPlay = autoCheckBox.Checked;
             _tetraSettings.NetworkBase = NetworkBaseSerializer(_networkBase);
+            _tetraSettings.FrequencyLocked = _frequencyLocked;
+            _tetraSettings.LockedFrequency = _lockedFrequency;
             _settingsPersister.PersistStored(_tetraSettings);
         }
 
