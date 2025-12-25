@@ -6,7 +6,6 @@ namespace SDRSharp.Tetra
     unsafe class MleLevel
     {
         private SdsParser _sds = new SdsParser();
-        private MmLevel _mm = new MmLevel();
 
         public void Parse(LogicChannel channelData, int offset, ReceivedData result)
         {
@@ -18,16 +17,16 @@ namespace SDRSharp.Tetra
 
             switch (protokol)
             {
-                case MLEPduType.MM:
-                    _mm.Parse(channelData, offset, result);
-                    break;
-
                 case MLEPduType.CMCE:
                     ParseCMCEPDU(channelData, offset, result);
                     break;
 
                 case MLEPduType.MLE:
                     ParseMLEPDU(channelData, offset, result);
+                    break;
+
+                case MLEPduType.MM:
+                    ParseMMPDU(channelData, ref offset, result);
                     break;
 
                 default:

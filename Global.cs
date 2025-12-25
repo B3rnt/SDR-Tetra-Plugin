@@ -5,13 +5,6 @@ using System.Runtime.CompilerServices;
 
 namespace SDRSharp.Tetra
 {
-    public static class RuntimeState
-    {
-        public static readonly Stopwatch RunTime = Stopwatch.StartNew();
-        public static volatile int CurrentLocationArea = -1;
-        public static volatile string LogWriteFolder = string.Empty;
-    }
-
     public enum GlobalNames
     {
         Data_Separator = 0,
@@ -123,7 +116,6 @@ namespace SDRSharp.Tetra
         Monitoring_pattern,
         Frame_18_monitoring_pattern,
         MLE_PDU_Type,
-        MM_PDU_Type,
         LLC_Pdu_Type,
         CMCE_Primitives_Type,
         MLE_Primitives_Type,
@@ -295,24 +287,15 @@ namespace SDRSharp.Tetra
         T5_el_ident,
         T5_el_length,
         T5_el_length_ex,
-
-        // --- Mobility Management (MM) ---
-        Authentication_sub_type,
-        Location_update_accept_type,
-        Location_update_type,
-        Reject_cause,
+        // --- Mobility Management (ported from reference) ---
+        MM_PDU_Type,
         MM_SSI,
         MM_GSSI,
+        Authentication_sub_type,
+        Location_update_accept_type,
+        Reject_cause,
         CCK_identifier,
         Status_downlink,
-        Group_identity_report,
-        Group_identity_acknowledgement_request,
-        Group_identity_attach_detach_mode,
-        Group_identity_accept_reject,
-        Cipher_control,
-        Ciphering_parameters,
-        MM_Address_extension,
-
         End // Always must be here
 
     }
@@ -372,11 +355,6 @@ namespace SDRSharp.Tetra
         {
             //Debug.WriteLineIf(Data[(int)name] != -1, "Value reused:" + name.ToString());
             Data[(int)name] = value;
-
-            if (name == GlobalNames.Location_Area)
-            {
-                RuntimeState.CurrentLocationArea = value;
-            }
         }
     }
 
@@ -844,6 +822,9 @@ namespace SDRSharp.Tetra
 
     unsafe static class Global
     {
+        // Updated by UI (TetraPanel) so parsers can write logs in same folder
+        public static string CurrentLogWriteFolder;
+
         public static bool IgnoreEncryptedSpeech;
 
         public static List<ReceivedData> NeighbourList = new List<ReceivedData>();

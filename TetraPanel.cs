@@ -165,9 +165,7 @@ namespace SDRSharp.Tetra
 
                 _settingsPersister = new SettingsPersister("tetraSettings_" + instanceNumber + ".xml");
                 _tetraSettings = _settingsPersister.ReadStored();
-
-                // Make log folder available for the MM registrations logger.
-                RuntimeState.LogWriteFolder = _tetraSettings.LogWriteFolder;
+                Global.CurrentLogWriteFolder = _tetraSettings?.LogWriteFolder;
 
                 
                 // Restore persisted frequency lock state

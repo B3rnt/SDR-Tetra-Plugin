@@ -1,22 +1,41 @@
+﻿using System;
+
 namespace SDRSharp.Tetra
 {
-    public enum MmPduType
-    {
-        D_OTAR = 0,
-        D_AUTHENTICATION = 1,
-        D_CK_CHANGE_DEMAND = 2,
-        D_DISABLE = 3,
-        D_ENABLE = 4,
-        D_LOCATION_UPDATE_ACCEPT = 5,
-        D_LOCATION_UPDATE_COMMAND = 6,
-        D_LOCATION_UPDATE_REJECT = 7,
-        Reserved8 = 8,
-        D_LOCATION_UPDATE_PROCEEDING = 9,
-        D_ATTACH_DETACH_GROUP_IDENTITY = 10,
-        D_ATTACH_DETACH_GROUP_IDENTITY_ACKNOWLEDGEMENT = 11,
-        D_MM_STATUS = 12,
-        Reserved13 = 13,
-        Reserved14 = 14,
-        MM_PDU_FUNCTION_NOT_SUPPORTED = 15
-    }
+	// Token: 0x02000032 RID: 50
+	public enum MmPduType
+	{
+		// Token: 0x04000243 RID: 579
+		D_OTAR,
+		// Token: 0x04000244 RID: 580
+		D_AUTHENTICATION,
+		// Token: 0x04000245 RID: 581
+		D_CK_CHANGE_DEMAND,
+		// Token: 0x04000246 RID: 582
+		D_DISABLE,
+		// Token: 0x04000247 RID: 583
+		D_ENABLE,
+		// Token: 0x04000248 RID: 584
+		D_LOCATION_UPDATE_ACCEPT,
+		// Token: 0x04000249 RID: 585
+		D_LOCATION_UPDATE_COMMAND,
+		// Token: 0x0400024A RID: 586
+		D_LOCATION_UPDATE_REJECT,
+		// Token: 0x0400024B RID: 587
+		Reserved8,
+		// Token: 0x0400024C RID: 588
+		D_LOCATION_UPDATE_PROCEEDING,
+		// Token: 0x0400024D RID: 589
+		D_ATTACH_DETACH_GROUP_IDENTITY,
+		// Token: 0x0400024E RID: 590
+		D_ATTACH_DETACH_GROUP_IDENTITY_ACKNOWLEDGEMENT,
+		// Token: 0x0400024F RID: 591
+		D_MM_STATUS,
+		// Token: 0x04000250 RID: 592
+		Reserved13,
+		// Token: 0x04000251 RID: 593
+		Reserved14,
+		// Token: 0x04000252 RID: 594
+		MM_PDU_FUNCTION_NOT_SUPPORTED
+	}
 }
