@@ -311,7 +311,16 @@ namespace SDRSharp.Tetra
         CCK_identifier,
         Reject_cause,
 
-        End // Always must be here
+                Cipher_control,
+        Ciphering_parameters,
+        MM_Address_extension,
+        Location_update_type,
+        Group_identity_report,
+        Group_identity_acknowledgement_request,
+        Group_identity_attach_detach_mode,
+        Group_identity_accept_reject,
+        Status_downlink,
+End // Always must be here
 
 }
 
