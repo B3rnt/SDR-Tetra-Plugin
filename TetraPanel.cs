@@ -34,6 +34,10 @@ namespace SDRSharp.Tetra
         private TetraDecoder _decoder;
 
         private UnsafeBuffer _iqBuffer;
+        private UnsafeBuffer _iqDecimBuffer;
+        private Complex* _iqDecimPtr;
+        private MultiStageDecimator _decimator;
+        private const double TetraTargetSampleRate = 25000.0;
         private Complex* _iqBufferPtr;
         private UnsafeBuffer _symbolsBuffer;
         private float* _symbolsBufferPtr;
@@ -90,17 +94,6 @@ namespace SDRSharp.Tetra
         private NetInfoWindow _infoWindow;
 
         private double _lastIqSampleRate;
-
-        // Internal AGC (per panel/channel). We process from wideband raw IQ now,
-        // so we need our own level normalisation for reliable demodulation.
-        private bool _agcEnabled = true;
-        private float _agcGain = 1.0f;
-        private float _agcRms = 0.5f;
-        private const float AgcTargetRms = 0.35f;
-        private const float AgcMinGain = 0.02f;
-        private const float AgcMaxGain = 50.0f;
-        private const float AgcRmsAlpha = 0.01f;   // RMS smoothing
-        private const float AgcGainAlpha = 0.0025f; // gain adaptation
 
         private List<ReceivedData> _rawData = new List<ReceivedData>();
         private List<ReceivedData> _cmceData = new List<ReceivedData>();
@@ -413,48 +406,6 @@ private void UpdateLockUi()
                 else if (phase < -TwoPi) phase += TwoPi;
             }
             _ncoPhase = phase;
-        }
-
-        private unsafe void ApplyInternalAgc(Complex* buffer, int length)
-        {
-            if (!_agcEnabled || length <= 0)
-                return;
-
-            // Estimate RMS power of the buffer (sub-sampled for speed).
-            // This AGC is intentionally simple and stable for constant-envelope modulations.
-            double p = 0;
-            int step = 8; // sub-sample
-            int n = 0;
-            for (int i = 0; i < length; i += step)
-            {
-                var re = buffer[i].Real;
-                var im = buffer[i].Imag;
-                p += (double)re * re + (double)im * im;
-                n++;
-            }
-            if (n == 0) return;
-
-            var rms = (float)Math.Sqrt(p / n);
-
-            // Smooth RMS to avoid pumping.
-            _agcRms = (1.0f - AgcRmsAlpha) * _agcRms + AgcRmsAlpha * rms;
-
-            // Desired gain update.
-            var desiredGain = AgcTargetRms / (_agcRms + 1e-9f);
-            if (desiredGain < AgcMinGain) desiredGain = AgcMinGain;
-            if (desiredGain > AgcMaxGain) desiredGain = AgcMaxGain;
-
-            _agcGain = _agcGain + AgcGainAlpha * (desiredGain - _agcGain);
-            if (_agcGain < AgcMinGain) _agcGain = AgcMinGain;
-            if (_agcGain > AgcMaxGain) _agcGain = AgcMaxGain;
-
-            // Apply gain.
-            var g = _agcGain;
-            for (int i = 0; i < length; i++)
-            {
-                buffer[i].Real *= g;
-                buffer[i].Imag *= g;
-            }
         }
 
         private Dictionary<int, NetworkEntry> NetworkBaseDeserializer(List<GroupsEntries> list)
@@ -805,10 +756,22 @@ private void UpdateLockUi()
                 // Digitally tune to either the locked frequency or the current selected frequency.
                 FrequencyTranslate(this._iqBufferPtr, burstSamples, this._iqSamplerate, GetTargetFrequencyHz());
 
-                // Normalise amplitude for reliable demodulation (internal AGC).
-                ApplyInternalAgc(this._iqBufferPtr, burstSamples);
+                // Resample/decimate to the original demodulator target sample rate (25 kHz).
+                if (_decimator == null || Math.Abs(_iqSamplerate - _lastDecimatorInputRate) > 1e-6)
+                {
+                    _lastDecimatorInputRate = _iqSamplerate;
+                    _decimator = new MultiStageDecimator(_iqSamplerate, TetraTargetSampleRate, burstSamples);
+                    // Allocate enough room for the decimated burst (worst-case input/1).
+                    if (_iqDecimBuffer == null || _iqDecimBuffer.Length < burstSamples)
+                    {
+                        _iqDecimBuffer = UnsafeBuffer.Create(burstSamples, sizeof(Complex));
+                        _iqDecimPtr = (Complex*)_iqDecimBuffer;
+                    }
+                }
 
-                this._demodulator.ProcessBuffer(burst, this._iqBufferPtr, this._iqSamplerate, burstSamples, this._symbolsBufferPtr);
+                var decLen = _decimator.Process(this._iqBufferPtr, burstSamples, _iqDecimPtr, burstSamples);
+
+                this._demodulator.ProcessBuffer(burst, _iqDecimPtr, TetraTargetSampleRate, decLen, this._symbolsBufferPtr);
                 /// END CRITICAL
 
                 if (burst.Type == BurstType.WaitBurst)
