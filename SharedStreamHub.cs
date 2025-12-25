@@ -14,7 +14,7 @@ namespace SDRSharp.Tetra
     /// one IQ hook and one audio hook, regardless of how many plugin windows
     /// are opened.
     /// </summary>
-    public sealed class SharedStreamHub
+    public sealed unsafe class SharedStreamHub
     {
         private static readonly object _sync = new object();
         private static readonly Dictionary<ISharpControl, SharedStreamHub> _instances = new();
@@ -33,10 +33,13 @@ namespace SDRSharp.Tetra
             _ifProcessor = new IFProcessor();
             // Wideband IQ (same trick as AuxVFO): ProcessorType 0
             _control.RegisterStreamHook(_ifProcessor, (ProcessorType)0);
+            // Ensure data starts flowing immediately
+            _ifProcessor.Enabled = true;
             _ifProcessor.IQReady += (buf, sr, len) => IQReady?.Invoke(buf, sr, len);
 
             _audioProcessor = new AudioProcessor();
             _control.RegisterStreamHook(_audioProcessor, ProcessorType.DemodulatorOutput);
+            _audioProcessor.Enabled = true;
             _audioProcessor.AudioReady += (buf, sr, len) => AudioReady?.Invoke(buf, sr, len);
         }
 

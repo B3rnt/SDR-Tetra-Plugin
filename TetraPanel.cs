@@ -51,6 +51,9 @@ namespace SDRSharp.Tetra
 
         private double _audioSamplerate;
 
+        // UI: shown when the locked frequency is outside the current received IQ bandwidth.
+        private Label _lockOutOfRangeLabel;
+
         private Thread _decodingThread;
         private bool _decodingIsStarted;
 
@@ -523,8 +526,6 @@ private void UpdateLockUi()
 
         private void StartDecoding()
         {
-            _ifProcessor.Enabled = true;
-
             _processIsStarted = true;
 
             DecoderStart();
@@ -532,8 +533,6 @@ private void UpdateLockUi()
 
         private void StopDecoding()
         {
-            _ifProcessor.Enabled = false;
-
             _processIsStarted = false;
 
             DecoderStop();
@@ -544,12 +543,13 @@ private void UpdateLockUi()
          */
         private bool CheckConditions()
         {
-            this._ifProcessor.SampleRate = 25000;
             this._controlInterface.StartRadio();
             this._controlInterface.DetectorType = DetectorType.WFM;
             this._controlInterface.FrequencyShift = 28000;
 
-            if (_ifProcessor.SampleRate < 25000)
+            // We no longer own the IFProcessor (it lives in SharedStreamHub), so we can't rely
+            // on its SampleRate property here. Instead, use the incoming IQ samplerate.
+            if (_lastIqSampleRate != 0 && _lastIqSampleRate < 25000)
             {
                 if (System.Globalization.CultureInfo.CurrentCulture.Name == "ru-RU")
                 {
@@ -630,14 +630,11 @@ private void UpdateLockUi()
             };
             _decodingThread.Start();
 
-            _audioProcessor.Enabled = true;
             _needDisplayBufferUpdate = true;
         }
 
         private void DecoderStop()
         {
-            _audioProcessor.Enabled = false;
-
             _decodingIsStarted = false;
 
             if (_decodingThread != null)
