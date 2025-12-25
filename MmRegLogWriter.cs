@@ -56,7 +56,14 @@ namespace SDRSharp.Tetra
                 _currentPath = Path.Combine(folder, "TETRA_MM-Registrations_" + day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".txt");
             }
 
-            File.AppendAllText(_currentPath, line + Environment.NewLine);
+            try
+            {
+                File.AppendAllText(_currentPath, line + Environment.NewLine);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("MM log write failed: " + ex.Message);
+            }
         }
     }
 }

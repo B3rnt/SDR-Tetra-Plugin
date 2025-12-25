@@ -287,22 +287,6 @@ namespace SDRSharp.Tetra
         T5_el_ident,
         T5_el_length,
         T5_el_length_ex,
-
-        // --- Mobility Management (MM) fields (reference SDRtetra) ---
-        MM_PDU_Type,
-        MM_SSI,
-        MM_GSSI,
-        MM_Address_extension,
-        Location_update_type,
-        Location_update_accept_type,
-        Reject_cause,
-        Authentication_sub_type,
-        Authentication_result,
-        CCK_identifier,
-        Cipher_control,
-        Ciphering_parameters,
-        Status_downlink,
-
         End // Always must be here
 
     }
