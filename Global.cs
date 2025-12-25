@@ -287,15 +287,15 @@ namespace SDRSharp.Tetra
         T5_el_ident,
         T5_el_length,
         T5_el_length_ex,
-        // --- Mobility Management (ported from reference) ---
-        MM_PDU_Type,
-        MM_SSI,
-        MM_GSSI,
-        Authentication_sub_type,
-        Location_update_accept_type,
-        Reject_cause,
-        CCK_identifier,
-        Status_downlink,
+	        // Mobility Management (MM)
+	        MM_PDU_Type,
+	        MM_SSI,
+	        MM_GSSI,
+	        Authentication_sub_type,
+	        Location_update_accept_type,
+	        Reject_cause,
+	        CCK_identifier,
+	        Status_downlink,
         End // Always must be here
 
     }
@@ -822,12 +822,13 @@ namespace SDRSharp.Tetra
 
     unsafe static class Global
     {
-        // Updated by UI (TetraPanel) so parsers can write logs in same folder
-        public static string CurrentLogWriteFolder;
+        public static bool IgnoreEncryptedSpeech;
 
+        // MM registrations logging (TETRA_MM-Registrations_YYYY-MM-DD.txt)
         public static bool LogMmRegistrations = true;
 
-        public static bool IgnoreEncryptedSpeech;
+        // Current log folder (copied from settings by TetraPanel)
+        public static string LogWriteFolder = string.Empty;
 
         public static List<ReceivedData> NeighbourList = new List<ReceivedData>();
         private static int _currentBand;
@@ -863,11 +864,11 @@ namespace SDRSharp.Tetra
                         continue;
 
                     case RulesType.Options_bit:
+                        // Options bit indicates whether optional fields are present.
+                        // It must NOT terminate parsing of the whole PDU (that breaks MM parsing).
+                        // Always consume the bit and continue; Presence_bit/More_bit rules handle
+                        // the remaining conditional structure.
                         offset += param.Length;
-                        if (value == 0)
-                        {
-                            return offset;
-                        }
                         break;
 
                     case RulesType.Presence_bit:
@@ -977,12 +978,6 @@ namespace SDRSharp.Tetra
     }
     public class TetraSettings
     {
-        public TetraSettings()
-        {
-            // Defaults (also applied when settings XML is missing fields)
-            LogMmRegistrations = true;
-        }
-
         public string LogFileNameRules { get; set; }
 
         public string LogWriteFolder { get; set; }
@@ -993,7 +988,8 @@ namespace SDRSharp.Tetra
 
         public bool LogEnabled { get; set; }
 
-        public bool LogMmRegistrations { get; set; }
+        // Write MM registrations log (TETRA_MM-Registrations_YYYY-MM-DD.txt)
+        public bool LogMmRegistrations { get; set; } = true;
 
         public int BlockedLevel { get; set; }
 

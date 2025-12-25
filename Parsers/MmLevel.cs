@@ -1,70 +1,28 @@
+using System.Collections.Generic;
+
 namespace SDRSharp.Tetra
 {
     unsafe class MmLevel
     {
-        // Based on the reference Class18 rules for MM PDUs.
-        private readonly Rules[] _locationUpdateAcceptRules = new Rules[]
-        {
-            new Rules(GlobalNames.Location_update_accept_type, 3),
-            new Rules(GlobalNames.Options_bit, 1, RulesType.Options_bit),
-            new Rules(GlobalNames.Presence_bit, 1, RulesType.Presence_bit, 1),
-            new Rules(GlobalNames.MM_SSI, 24),
-            new Rules(GlobalNames.Presence_bit, 1, RulesType.Presence_bit, 1),
-            // In the reference code this is marked Reserved (24). We use it as MM_GSSI when present.
-            new Rules(GlobalNames.MM_GSSI, 24),
-            new Rules(GlobalNames.Presence_bit, 1, RulesType.Presence_bit, 1),
-            // In the reference code this is Reserved (16). We use low 4 bits as CCK_identifier.
-            new Rules(GlobalNames.CCK_identifier, 16),
-            new Rules(GlobalNames.Presence_bit, 1, RulesType.Presence_bit, 1),
-            new Rules(GlobalNames.Reserved, 14, RulesType.Reserved),
-            new Rules(GlobalNames.Presence_bit, 1, RulesType.Presence_bit, 1),
-            new Rules(GlobalNames.Reserved, 6, RulesType.Reserved)
-        };
-
-        private readonly Rules[] _locationUpdateRejectRules = new Rules[]
-        {
-            new Rules(GlobalNames.Location_update_type, 3),
-            new Rules(GlobalNames.Reject_cause, 5),
-            new Rules(GlobalNames.Cipher_control, 1),
-            new Rules(GlobalNames.Ciphering_parameters, 10, RulesType.Switch, (int)GlobalNames.Cipher_control, 1),
-            new Rules(GlobalNames.Options_bit, 1, RulesType.Options_bit),
-            new Rules(GlobalNames.Presence_bit, 1, RulesType.Presence_bit, 1),
-            new Rules(GlobalNames.MM_Address_extension, 24)
-        };
-
-        private readonly Rules[] _authenticationRules = new Rules[]
-        {
-            new Rules(GlobalNames.Authentication_sub_type, 2),
-            new Rules(GlobalNames.Options_bit, 1, RulesType.Options_bit),
-            new Rules(GlobalNames.Presence_bit, 1, RulesType.Presence_bit, 1),
-            new Rules(GlobalNames.MM_SSI, 24),
-            new Rules(GlobalNames.Presence_bit, 1, RulesType.Presence_bit, 1),
-            new Rules(GlobalNames.MM_Address_extension, 24)
-        };
+        private readonly Class18 _class18 = new Class18();
 
         public void Parse(LogicChannel channelData, int offset, ReceivedData result)
         {
-            var pduType = (MmPduType)TetraUtils.BitsToInt32(channelData.Ptr, offset, 4);
-            offset += 4;
-            result.Add(GlobalNames.MM_PDU_Type, (int)pduType);
+            // Class18 works with a dictionary-like view.
+            var dict = new Dictionary<GlobalNames, int>();
 
-            switch (pduType)
+            // Copy already known globals that might be needed by the logger (eg Location_Area)
+            if (result.Contains(GlobalNames.Location_Area))
+                dict[GlobalNames.Location_Area] = result.Value(GlobalNames.Location_Area);
+
+            _class18.method_0(channelData, ref offset, dict);
+
+            // Merge parsed values back into ReceivedData.
+            foreach (var kv in dict)
             {
-                case MmPduType.D_AUTHENTICATION:
-                    Global.ParseParams(channelData, offset, _authenticationRules, result);
-                    break;
-
-                case MmPduType.D_LOCATION_UPDATE_ACCEPT:
-                    Global.ParseParams(channelData, offset, _locationUpdateAcceptRules, result);
-                    break;
-
-                case MmPduType.D_LOCATION_UPDATE_REJECT:
-                    Global.ParseParams(channelData, offset, _locationUpdateRejectRules, result);
-                    break;
+                if (kv.Key == GlobalNames.Reserved) continue;
+                result.SetValue(kv.Key, kv.Value);
             }
-
-            // Write MM registrations log.
-            MmRegistrationsLogger.Log(result);
         }
     }
 }
