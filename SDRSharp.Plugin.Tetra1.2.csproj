@@ -29,11 +29,12 @@
     <Compile Update="Display.cs" />
     <Compile Update="NetInfoWindow.cs" />
     <Compile Update="TetraPanel.cs" />
-
-    <!-- Safety: some forks include duplicate Rules/RulesType files; exclude them if present -->
+    <ItemGroup>
     <Compile Remove="Rules.cs" />
     <Compile Remove="RulesType.cs" />
   </ItemGroup>
+
+</ItemGroup>
 
   <ItemGroup>
     <None Include="Properties\Settings.settings">

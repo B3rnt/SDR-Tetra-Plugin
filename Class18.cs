@@ -1,115 +1,156 @@
 using System;
-using System.Collections.Generic;
 
 namespace SDRSharp.Tetra
 {
-    // Clean (non-obfuscated) replacement for the decompiled Class18.
-    // This decoder focuses on MM (Mobility Management) primitives required for
-    // producing the MM registrations log.
-    internal sealed class Class18
+    /// <summary>
+    /// Clean (non-obfuscated) MM decoder/formatter.
+    /// It focuses on producing the same MM registration log lines as the reference plugin.
+    /// </summary>
+    internal static class Class18
     {
-        // Parse MM PDU from logic channel bitstream.
-        // int_0 is a bit offset.
-        public void method_0(LogicChannel logicChannel_0, ref int int_0, Dictionary<GlobalNames, int> dictionary_0)
+        public static MmInfo ParseMm(LogicChannel channelData, int offset, ReceivedData received)
         {
-            if (logicChannel_0.Ptr == null) return;
-            if (dictionary_0 == null) return;
+            // offset points to MM PDU contents (right after MLE PDU type)
+            var info = new MmInfo();
 
-            int start = int_0;
+            // Location Area & SSI are available elsewhere in this plugin (decoded at lower layers)
+            // Use those as primary sources to avoid relying on optional elements inside MM PDUs.
+            int la = received.GetValue(GlobalNames.Location_Area);
+            if (la >= 0) info.LocationArea = la;
 
-            // MM PDU type (4 bits)
-            int mmTypeVal = TetraUtils.BitsToInt32(logicChannel_0.Ptr, int_0, 4);
-            int_0 += 4;
-            dictionary_0[GlobalNames.MM_PDU_Type] = mmTypeVal;
+            int ssi = received.GetValue(GlobalNames.SSI);
+            if (ssi >= 0) info.Ssi = ssi;
 
-            var mmType = (MmPduType)mmTypeVal;
+            // MM PDU type is 4 bits at start of MM PDU
+            int mmPduType = TetraUtils.BitsToInt32(channelData.Ptr, offset, 4);
+            offset += 4;
 
-            // Best-effort decoding of a few common fields.
-            // NOTE: Exact field placement varies by primitive; this is designed to
-            // work for the registrations/authentication messages seen in the provided logs.
+            // Try to parse a few common fields used for the registrations log.
+            // Many PDUs share: Location update type (2 bits) and reject cause (5 bits),
+            // but layouts vary. We use conservative reads guarded by bounds.
+            string msg = MmText.MapBasic(mmPduType);
 
-            int ssi = TryReadSsi(logicChannel_0, int_0, logicChannel_0.Length);
-            if (ssi != 0) dictionary_0[GlobalNames.MM_SSI] = ssi;
-
-            string msg = BuildLogMessage(mmType, logicChannel_0, start, ref int_0, dictionary_0);
-            if (!string.IsNullOrEmpty(msg))
+            // Try parse auth subtype (2 bits) right after type for auth PDUs.
+            if (mmPduType == 1 || mmPduType == 2) // heuristic: auth demand/result
             {
-                MmRegistrationsLogger.Log(dictionary_0, msg);
+                int authSub = SafeBits(channelData, offset, 2);
+                if (authSub >= 0)
+                {
+                    msg = MmText.MapAuthentication(mmPduType, authSub);
+                    offset += 2;
+                }
+            }
+
+            // Try parse location update accept/reject types
+            if (mmPduType == 8) // accept (heuristic)
+            {
+                int accType = SafeBits(channelData, offset, 2);
+                if (accType >= 0)
+                {
+                    msg = MmText.MapRegistrationAccepted(accType, info.Ssi);
+                }
+            }
+            else if (mmPduType == 9) // reject (heuristic)
+            {
+                int luType = SafeBits(channelData, offset, 2);
+                if (luType >= 0) offset += 2;
+                int cause = SafeBits(channelData, offset, 5);
+                if (cause >= 0)
+                {
+                    msg = MmText.MapRegistrationRejected(luType, cause, info.Ssi);
+                }
+            }
+
+            info.Message = msg;
+            return info;
+        }
+
+        private static int SafeBits(LogicChannel ch, int offset, int len)
+        {
+            if (offset + len > ch.Length) return -1;
+            return TetraUtils.BitsToInt32(ch.Ptr, offset, len);
+        }
+    }
+
+    internal static class MmText
+    {
+        public static string MapBasic(int pduType)
+        {
+            // Fallback
+            return "MM: PDU " + pduType;
+        }
+
+        public static string MapAuthentication(int pduType, int subType)
+        {
+            // Reference log examples:
+            // "BS demands authentication: SSI: x"
+            // "BS result to MS authentication: Authentication successful or no authentication currently in progress SSI: x - Authentication successful or no authentication currently in progress"
+            if (pduType == 1)
+            {
+                return "BS demands authentication";
+            }
+            if (pduType == 2)
+            {
+                // subtype 0 => successful/no auth in progress, 1 => failed (common)
+                if (subType == 1)
+                    return "BS result to MS authentication: Authentication failed";
+                return "BS result to MS authentication: Authentication successful or no authentication currently in progress";
+            }
+            return "Authentication";
+        }
+
+        public static string MapRegistrationAccepted(int acceptType, int? ssi)
+        {
+            // Example:
+            // "MS request for registration/authentication ACCEPTED for SSI: x"
+            return "MS request for registration/authentication ACCEPTED";
+        }
+
+        public static string MapRegistrationRejected(int luType, int cause, int? ssi)
+        {
+            // Text list provided by user / reference blog
+            // "MS request for registration REJECTED for SSI: x - Roaming location updating CAUSE: Illegal MS (system rejection)"
+            return "MS request for registration REJECTED" + MapLuTypeSuffix(luType) + " CAUSE: " + MapRejectCause(cause);
+        }
+
+        private static string MapLuTypeSuffix(int luType)
+        {
+            switch (luType)
+            {
+                case 0: return " - Roaming location updating";
+                case 1: return " - Periodic location updating";
+                case 2: return " - Demand location updating";
+                case 3: return " - Service restoration roaming location updating";
+                default: return string.Empty;
             }
         }
 
-        private static int TryReadSsi(LogicChannel ch, int offset, int totalBits)
+        // Cause mapping (partial but extendable)
+        public static string MapRejectCause(int cause)
         {
-            // Heuristic: scan first 64 bits for a plausible 24-bit SSI (non-zero).
-            int end = Math.Min(totalBits - 24, offset + 64);
-            for (int bit = offset; bit <= end; bit++)
+            switch (cause)
             {
-                int v = TetraUtils.BitsToInt32(ch.Ptr, bit, 24);
-                if (v > 0 && v < 0xFFFFFF) return v;
-            }
-            return 0;
-        }
-
-        private static string BuildLogMessage(MmPduType mmType, LogicChannel ch, int mmStartOffset, ref int offset, Dictionary<GlobalNames, int> dict)
-        {
-            // For the messages we know from the sample log, we emit the exact wording.
-            // Unknown types still generate a minimal line to make sure the file is written.
-
-            switch (mmType)
-            {
-                case MmPduType.D_AUTHENTICATION:
-                {
-                    // Subtype is typically 2 bits after MM PDU type.
-                    int subtype = TetraUtils.BitsToInt32(ch.Ptr, mmStartOffset + 4, 2);
-                    dict[GlobalNames.Authentication_sub_type] = subtype;
-                    int ssi = dict.TryGetValue(GlobalNames.MM_SSI, out var v) ? v : 0;
-
-                    var st = (D_AuthenticationPduSubType)subtype;
-                    if (st == D_AuthenticationPduSubType.Demand)
-                    {
-                        return $"BS demands authentication: SSI: {ssi}";
-                    }
-                    if (st == D_AuthenticationPduSubType.Result)
-                    {
-                        // Matches the sample text.
-                        return $"BS result to MS authentication: Authentication successful or no authentication currently in progress SSI: {ssi} - Authentication successful or no authentication currently in progress";
-                    }
-                    if (st == D_AuthenticationPduSubType.Reject)
-                    {
-                        return $"BS rejects authentication for SSI: {ssi}";
-                    }
-                    return $"Authentication: SSI: {ssi}";
-                }
-
-                case MmPduType.D_LOCATION_UPDATE_ACCEPT:
-                {
-                    int ssi = dict.TryGetValue(GlobalNames.MM_SSI, out var v) ? v : 0;
-                    // Accept type (2 bits) is commonly present; store if we can.
-                    int acceptType = TetraUtils.BitsToInt32(ch.Ptr, mmStartOffset + 4, 2);
-                    dict[GlobalNames.Location_update_accept_type] = acceptType;
-                    // We don't have the full mapping table; emit a conservative message.
-                    return $"MS request for registration/authentication ACCEPTED for SSI: {ssi}";
-                }
-
-                case MmPduType.D_LOCATION_UPDATE_REJECT:
-                {
-                    int ssi = dict.TryGetValue(GlobalNames.MM_SSI, out var v) ? v : 0;
-                    int cause = TetraUtils.BitsToInt32(ch.Ptr, mmStartOffset + 4, 5);
-                    dict[GlobalNames.Reject_cause] = cause;
-                    return $"MS updating in the network is NOT ACCEPTED for SSI: {ssi}";
-                }
-
-                case MmPduType.D_MM_STATUS:
-                {
-                    int ssi = dict.TryGetValue(GlobalNames.MM_SSI, out var v) ? v : 0;
-                    return $"MM status: SSI: {ssi}";
-                }
-
-                default:
-                {
-                    int ssi = dict.TryGetValue(GlobalNames.MM_SSI, out var v) ? v : 0;
-                    return $"MM: {mmType} SSI: {ssi}";
-                }
+                case 0: return "Illegal MS (system rejection)";
+                case 1: return "Requested cipher key type not available (cell rejection)";
+                case 2: return "Identified cipher key not available (cell rejection)";
+                case 3: return "Roaming not supported (LA rejection)";
+                case 4: return "LA unknown (LA rejection)";
+                case 5: return "Identified cipher KSG not supported (cell rejection)";
+                case 6: return "Use of DA cell not permitted (cell type rejection)";
+                case 7: return "Ciphering required (cell rejection)";
+                case 8: return "Migration not supported (system rejection)";
+                case 9: return "Congestion (cell rejection)";
+                case 10: return "Mandatory element error (system rejection)";
+                case 11: return "No cipher KSG (cell rejection)";
+                case 12: return "LA not allowed (LA rejection)";
+                case 13: return "ITSI/ATSI unknown (system rejection)";
+                case 14: return "Message consistency error (system rejection)";
+                case 15: return "Forward registration failure (cell rejection)";
+                case 16: return "Service not subscribed (LA rejection)";
+                case 17: return "Network failure (cell rejection)";
+                case 18: return "Use of CA cell not permitted (cell type rejection)";
+                case 19: return "Authentication failure (system rejection)";
+                default: return "Cause " + cause;
             }
         }
     }
