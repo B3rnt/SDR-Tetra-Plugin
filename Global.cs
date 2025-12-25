@@ -118,15 +118,6 @@ namespace SDRSharp.Tetra
         MLE_PDU_Type,
         LLC_Pdu_Type,
         CMCE_Primitives_Type,
-        MM_PDU_Type,
-        MM_SSI,
-        MM_GSSI,
-        Authentication_sub_type,
-        Location_update_accept_type,
-        Reject_cause,
-        CCK_identifier,
-        Status_downlink,
-
         MLE_Primitives_Type,
         Cell_reselect_parameters,
         Cell_service_level,
@@ -822,13 +813,15 @@ namespace SDRSharp.Tetra
 
     unsafe static class Global
     {
-        public static bool IgnoreEncryptedSpeech;
-        // MM registrations logging (separate daily file)
+        // MM Registrations logging (default ON)
         public static bool LogMmRegistrations = true;
-        // Current settings (set by TetraPanel)
-        public static TetraSettings CurrentSettings;
 
+        // Folder where log files should be written. Set from TetraPanel after settings are loaded.
+        public static string LogWriteFolder = string.Empty;
 
+        
+        public static TetraSettings Settings;
+public static bool IgnoreEncryptedSpeech;
 
         public static List<ReceivedData> NeighbourList = new List<ReceivedData>();
         private static int _currentBand;
@@ -863,12 +856,15 @@ namespace SDRSharp.Tetra
                         offset += param.Length;
                         continue;
 
-	                    case RulesType.Options_bit:
-	                        // In the reference plugin the options bit does NOT terminate parsing;
-	                        // it only indicates that an optional field group may follow.
-	                        // We always advance the offset and continue parsing.
-	                        offset += param.Length;
-	                        break;
+                    case RulesType.Options_bit:
+                        // In the reference implementation, Options_bit does not abort parsing.
+                        // When 0, it means "options absent" and the following optional rules can be skipped.
+                        if (value == 0)
+                        {
+                            skipRules = param.Ext1;
+                        }
+                        offset += param.Length;
+                        break;
 
                     case RulesType.Presence_bit:
                         if (value == 0)
@@ -977,6 +973,14 @@ namespace SDRSharp.Tetra
     }
     public class TetraSettings
     {
+        public TetraSettings()
+        {
+            // Default ON to match reference plugin behavior
+            LogMmRegistrations = true;
+        }
+
+        public bool LogMmRegistrations { get; set; }
+
         public string LogFileNameRules { get; set; }
 
         public string LogWriteFolder { get; set; }
@@ -986,9 +990,6 @@ namespace SDRSharp.Tetra
         public string LogSeparator { get; set; }
 
         public bool LogEnabled { get; set; }
-
-        // Write MM registrations logfile (TETRA_MM-Registrations_YYYY-MM-DD.txt)
-        public bool LogMmRegistrations { get; set; } = true;
 
         public int BlockedLevel { get; set; }
 

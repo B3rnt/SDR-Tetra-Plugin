@@ -6,7 +6,7 @@ namespace SDRSharp.Tetra
     /// Clean (non-obfuscated) MM decoder/formatter.
     /// It focuses on producing the same MM registration log lines as the reference plugin.
     /// </summary>
-    internal static class Class18
+    internal static unsafe class Class18
     {
         public static MmInfo ParseMm(LogicChannel channelData, int offset, ReceivedData received)
         {
@@ -15,10 +15,10 @@ namespace SDRSharp.Tetra
 
             // Location Area & SSI are available elsewhere in this plugin (decoded at lower layers)
             // Use those as primary sources to avoid relying on optional elements inside MM PDUs.
-            int la = received.GetValue(GlobalNames.Location_Area);
+            int la = received.Value(GlobalNames.Location_Area);
             if (la >= 0) info.LocationArea = la;
 
-            int ssi = received.GetValue(GlobalNames.SSI);
+            int ssi = received.Value(GlobalNames.SSI);
             if (ssi >= 0) info.Ssi = ssi;
 
             // MM PDU type is 4 bits at start of MM PDU

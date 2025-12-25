@@ -29,7 +29,13 @@
     <Compile Update="Display.cs" />
     <Compile Update="NetInfoWindow.cs" />
     <Compile Update="TetraPanel.cs" />
-  </ItemGroup>
+    <Compile Remove="Rules.cs" />
+    <Compile Remove="RulesType.cs" />
+    <Compile Remove="MmRegistrationsLogger.cs" />
+    <Compile Remove="LocationTypeExtension.cs" />
+    <Compile Remove="Parsers\\MmLevel.cs" />
+
+</ItemGroup>
 
   <ItemGroup>
     <None Include="Properties\Settings.settings">
@@ -53,14 +59,6 @@
       <HintPath>lib\native\x86\SDRSharp.PanView.dll</HintPath>
       <Private>true</Private>
     </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Remove="Rules.cs" />
-    <Compile Remove="RulesType.cs" />
-    <Compile Remove="MmRegistrationsLogger.cs" />
-    <Compile Remove="LocationTypeExtension.cs" />
-    <Compile Remove="Parsers\MmLevel.cs" />
   </ItemGroup>
 
 </Project>
