@@ -55,4 +55,9 @@
     </Reference>
   </ItemGroup>
 
+
+  <ItemGroup>
+    <Compile Remove="Rules.cs" />
+    <Compile Remove="RulesType.cs" />
+  </ItemGroup>
 </Project>

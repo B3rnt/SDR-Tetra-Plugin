@@ -166,6 +166,7 @@ namespace SDRSharp.Tetra
                 _settingsPersister = new SettingsPersister("tetraSettings_" + instanceNumber + ".xml");
                 _tetraSettings = _settingsPersister.ReadStored();
                 Global.CurrentLogWriteFolder = _tetraSettings?.LogWriteFolder;
+                Global.LogMmRegistrations = _tetraSettings?.LogMmRegistrations ?? true;
 
                 
                 // Restore persisted frequency lock state

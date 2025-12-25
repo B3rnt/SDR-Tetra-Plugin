@@ -825,6 +825,8 @@ namespace SDRSharp.Tetra
         // Updated by UI (TetraPanel) so parsers can write logs in same folder
         public static string CurrentLogWriteFolder;
 
+        public static bool LogMmRegistrations = true;
+
         public static bool IgnoreEncryptedSpeech;
 
         public static List<ReceivedData> NeighbourList = new List<ReceivedData>();
@@ -975,6 +977,12 @@ namespace SDRSharp.Tetra
     }
     public class TetraSettings
     {
+        public TetraSettings()
+        {
+            // Defaults (also applied when settings XML is missing fields)
+            LogMmRegistrations = true;
+        }
+
         public string LogFileNameRules { get; set; }
 
         public string LogWriteFolder { get; set; }
@@ -984,6 +992,8 @@ namespace SDRSharp.Tetra
         public string LogSeparator { get; set; }
 
         public bool LogEnabled { get; set; }
+
+        public bool LogMmRegistrations { get; set; }
 
         public int BlockedLevel { get; set; }
 

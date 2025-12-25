@@ -13,6 +13,7 @@ namespace SDRSharp.Tetra
         // We keep last known LA per channel in case message doesn't carry it
         public static void TryLog(LogicChannel ch, Dictionary<GlobalNames,int> d)
         {
+            if (!Global.LogMmRegistrations) return;
             try
             {
                 if (d == null || d.Count == 0) return;
