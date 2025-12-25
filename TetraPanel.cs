@@ -1508,6 +1508,8 @@ private void UpdateLockUi()
         private void UpdateGlobals()
         {
             Global.IgnoreEncryptedSpeech = _tetraSettings.IgnoreEncodedSpeech;
+            Global.LogWriteFolder = _tetraSettings.LogWriteFolder;
+            Global.LogMmRegistrations = _tetraSettings.LogMmRegistrations;
         }
 
         private void BlockNumericUpDown_ValueChanged(object sender, EventArgs e)

@@ -287,7 +287,31 @@ namespace SDRSharp.Tetra
         T5_el_ident,
         T5_el_length,
         T5_el_length_ex,
+        // Mobility Management (MM) logging / parsing
+        Registration_required,
+        MM_PDU_Type,
+        MM_Address_extension,
+        MM_Not_supported_PDU_type,
+        MM_SSI,
+        MM_GSSI,
+        MM_GSSI2,
+        MM_GSSI3,
+        MM_GSSI4,
+        MM_GSSI5,
+        MM_vGSSI,
+        Registrations_permitted,
+        Registrations_label,
+        Registration_phase_time_remaining,
+        Registration_access_parameter,
+        Registrations_forwarded_flag,
+        Registration_phase_terminated_flag,
         End // Always must be here
+        // Added for MM registrations logfile
+        Authentication_sub_type,
+        Location_update_accept_type,
+        CCK_identifier,
+        Reject_cause,
+
 
     }
 
@@ -815,6 +839,8 @@ namespace SDRSharp.Tetra
     {
         public static bool IgnoreEncryptedSpeech;
 
+        public static string LogWriteFolder = "";
+        public static bool LogMmRegistrations = true;
         public static List<ReceivedData> NeighbourList = new List<ReceivedData>();
         private static int _currentBand;
         private static int _currentOffset;
@@ -972,6 +998,8 @@ namespace SDRSharp.Tetra
         public string LogSeparator { get; set; }
 
         public bool LogEnabled { get; set; }
+
+        public bool LogMmRegistrations { get; set; }
 
         public int BlockedLevel { get; set; }
 
