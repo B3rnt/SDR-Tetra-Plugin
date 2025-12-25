@@ -165,12 +165,14 @@ namespace SDRSharp.Tetra
 
                 _settingsPersister = new SettingsPersister("tetraSettings_" + instanceNumber + ".xml");
                 _tetraSettings = _settingsPersister.ReadStored();
-
-                // MM registration logging (default ON if missing in settings)
+                // MM registrations logging default ON
                 Global.LogMmRegistrations = (_tetraSettings != null) ? _tetraSettings.LogMmRegistrations : true;
+                Global.CurrentSettings = _tetraSettings;
 
-                                Global.Settings = _tetraSettings;
-// Restore persisted frequency lock state
+
+
+                
+                // Restore persisted frequency lock state
                 _frequencyLocked = _tetraSettings.FrequencyLocked;
                 _lockedFrequency = _tetraSettings.LockedFrequency;
                 if (_lockedFrequency != 0)

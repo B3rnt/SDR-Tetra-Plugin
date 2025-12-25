@@ -15,7 +15,7 @@ namespace SDRSharp.Tetra
         private static DateTime _currentDay = DateTime.MinValue.Date;
         private static string _currentPath;
 
-        public static void TryLog(MmInfo info, TetraSettings settings)
+        public static void TryLog(MmInfo info, TetraSettings settings = null)
         {
             if (!Global.LogMmRegistrations) return;
             if (info == null || string.IsNullOrEmpty(info.Message)) return;
@@ -38,7 +38,7 @@ namespace SDRSharp.Tetra
                 line += ": SSI: " + ssi.ToString(CultureInfo.InvariantCulture);
             }
 
-            WriteLine(line, settings);
+            WriteLine(line, settings ?? Global.CurrentSettings);
         }
 
         private static void WriteLine(string line, TetraSettings settings)

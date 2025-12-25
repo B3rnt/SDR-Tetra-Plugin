@@ -21,14 +21,14 @@ namespace SDRSharp.Tetra
                     ParseCMCEPDU(channelData, offset, result);
                     break;
 
-                case MLEPduType.MLE:
-                    ParseMLEPDU(channelData, offset, result);
+                case MLEPduType.MM:
+                    // Mobility Management (MM)
+                    var mmInfo = Class18.ParseMm(channelData, offset, result);
+                    MmRegLogWriter.TryLog(mmInfo);
                     break;
 
-                case MLEPduType.MM:
-                    // Mobility Management
-                    var mmInfo = Class18.ParseMm(channelData, offset, result);
-                    MmRegLogWriter.TryLog(mmInfo, Global.Settings);
+                case MLEPduType.MLE:
+                    ParseMLEPDU(channelData, offset, result);
                     break;
 
                 default:
