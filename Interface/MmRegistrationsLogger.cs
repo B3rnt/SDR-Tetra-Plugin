@@ -83,7 +83,7 @@ namespace SDRSharp.Tetra
         private static int GetLa(ReceivedData data)
         {
             int v = 0;
-            if (data.TryGetValue(GlobalNames.LA, ref v)) return v;
+            if (data.TryGetValue(GlobalNames.Location_Area, ref v)) return v;
             // fall back: some decoders use LAC / Location_area etc. Not in this codebase.
             return -1;
         }
