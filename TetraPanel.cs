@@ -132,6 +132,10 @@ namespace SDRSharp.Tetra
         // digitally shifting the wideband IQ stream.
         private bool _frequencyLocked;
         private long _lockedFrequency;
+        // Per-channel working frequency. This must NOT follow SDR# mouse clicks/VFO movements.
+        // It is only updated explicitly by the user ("Kies deze frequentie") or on first start.
+        private long _selectedFrequency;
+        private bool _hasSelectedFrequency;
         private double _ncoPhase;        private double _ncoSampleRate;
 
         // UI elements created at runtime (so we don't have to touch the designer)
@@ -155,6 +159,11 @@ namespace SDRSharp.Tetra
                 // Restore persisted frequency lock state
                 _frequencyLocked = _tetraSettings.FrequencyLocked;
                 _lockedFrequency = _tetraSettings.LockedFrequency;
+                if (_lockedFrequency != 0)
+                {
+                    _selectedFrequency = _lockedFrequency;
+                    _hasSelectedFrequency = true;
+                }
 #region Default Settings
                 if (_tetraSettings.LogEntryRules == null || _tetraSettings.LogEntryRules == string.Empty)
                     _tetraSettings.LogEntryRules = DefaultLogEntryRules;
@@ -275,7 +284,10 @@ namespace SDRSharp.Tetra
             }
             else
             {
+                // Snapshot the current SDR# frequency only when the user explicitly asks.
                 _lockedFrequency = _controlInterface.Frequency;
+                _selectedFrequency = _lockedFrequency;
+                _hasSelectedFrequency = true;
                 _frequencyLocked = true;
                 ResetDecoder();
             }
@@ -329,7 +341,16 @@ private void UpdateLockUi()
 
         private long GetTargetFrequencyHz()
         {
-            return _frequencyLocked ? _lockedFrequency : _controlInterface.Frequency;
+            if (_frequencyLocked)
+                return _lockedFrequency;
+
+            // When unlocked, do NOT follow SDR# frequency changes.
+            // Use the last explicitly selected frequency (or initial snapshot).
+            if (_hasSelectedFrequency)
+                return _selectedFrequency;
+
+            // Fallback (should only happen before first start)
+            return _controlInterface.Frequency;
         }
 
         private int GetBurstSamples(double sampleRate)
@@ -465,11 +486,9 @@ private void UpdateLockUi()
                     break;
 
                 case "Frequency":
-                    // If we're frequency-locked we keep decoding on the locked carrier;
-                    // don't hard-reset the decoder on every VFO movement.
-                    if (!_frequencyLocked && !_isAfcWork)
-                        ResetDecoder();
-
+                    // Do not follow SDR# frequency changes. The channel uses its own
+                    // internal target frequency (selected/locked).
+                    // We only clear AFC state here.
                     _isAfcWork = false;
                     break;
 
@@ -507,7 +526,8 @@ private void UpdateLockUi()
 
             _needGroupsUpdate = true;
 
-            _currentCell_Carrier = (int)Math.Round((_controlInterface.Frequency % 100000000) / 25000.0);
+            var f = GetTargetFrequencyHz();
+            _currentCell_Carrier = (int)Math.Round((f % 100000000) / 25000.0);
 
             _sysInfo.Clear();
             _currentCalls.Clear();
@@ -543,9 +563,12 @@ private void UpdateLockUi()
          */
         private bool CheckConditions()
         {
+            // IMPORTANT:
+            // Do NOT change SDR# global demodulator/tuning settings here.
+            // Doing so makes the waterfall/jumps and makes frequency readouts unreliable.
+            // We do our own internal tuning (frequency translation) per channel.
+            // We only require that SDR# is running and providing IQ.
             this._controlInterface.StartRadio();
-            this._controlInterface.DetectorType = DetectorType.WFM;
-            this._controlInterface.FrequencyShift = 28000;
 
             // We no longer own the IFProcessor (it lives in SharedStreamHub), so we can't rely
             // on its SampleRate property here. Instead, use the incoming IQ samplerate.
@@ -1277,7 +1300,7 @@ private void UpdateLockUi()
                 mainCarrierLabel.Text = _mainCell_Carrier.ToString();
                 mainFrequencyLinkLabel.Text = string.Format("{0:0,0.000###} MHz", _mainCell_Frequency * 0.000001m);
                 currentCarrierLabel.Text = _currentCell_Carrier.ToString();
-                currentFrequencyLabel.Text = string.Format("{0:0,0.000###} MHz", _controlInterface.Frequency * 0.000001m);
+                currentFrequencyLabel.Text = string.Format("{0:0,0.000###} MHz", GetTargetFrequencyHz() * 0.000001m);
                 UpdateLockUi();
             }
         }
@@ -1290,6 +1313,16 @@ private void UpdateLockUi()
                 {
                     enabledCheckBox.Checked = false;
                     return;
+                }
+
+                // Snapshot the SDR# frequency once on start (only if the user
+                // hasn't explicitly chosen a frequency yet). From now on we
+                // do NOT follow SDR# mouse clicks/VFO moves unless the user
+                // presses "Kies deze frequentie".
+                if (!_hasSelectedFrequency)
+                {
+                    _selectedFrequency = _controlInterface.Frequency;
+                    _hasSelectedFrequency = true;
                 }
 
                 ResetDecoder();
@@ -1441,7 +1474,18 @@ private void UpdateLockUi()
 
         private void MainFrequencyLinkLabel_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
         {
-            _controlInterface.Frequency = _mainCell_Frequency;
+            // Do not retune SDR# globally; just set this channel's target frequency.
+            if (_mainCell_Frequency <= 0) return;
+
+            _selectedFrequency = _mainCell_Frequency;
+            _hasSelectedFrequency = true;
+
+            // Also lock to it (explicit user action).
+            _lockedFrequency = _mainCell_Frequency;
+            _frequencyLocked = true;
+
+            ResetDecoder();
+            UpdateLockUi();
         }
 
         #endregion
