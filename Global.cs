@@ -134,7 +134,6 @@ namespace SDRSharp.Tetra
         Neighbour_MCC,
         Neighbour_MNC,
         Neighbour_LA,
-        EndOfData,
         TDMA_frame_offset,
         Timeshare_cell_and_AI_encryption,
         Minimum_RX_access_level,
@@ -287,7 +286,7 @@ namespace SDRSharp.Tetra
         T5_el_ident,
         T5_el_length,
         T5_el_length_ex,
-        // Mobility Management (MM) logging / parsing
+        // Mobility Management (MM) logging / parsing,
         Registration_required,
         MM_PDU_Type,
         MM_Address_extension,
@@ -305,15 +304,16 @@ namespace SDRSharp.Tetra
         Registration_access_parameter,
         Registrations_forwarded_flag,
         Registration_phase_terminated_flag,
-        End // Always must be here
+
         // Added for MM registrations logfile
         Authentication_sub_type,
         Location_update_accept_type,
         CCK_identifier,
         Reject_cause,
 
+        End // Always must be here
 
-    }
+}
 
     public class ReceivedData
     {
