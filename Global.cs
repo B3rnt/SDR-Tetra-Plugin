@@ -286,8 +286,8 @@ namespace SDRSharp.Tetra
         T5_el_ident,
         T5_el_length,
         T5_el_length_ex,
-        // Mobility Management (MM) logging / parsing,
-        Registration_required,
+	        // Mobility Management (MM) logging / parsing,
+	        // (Registration_required is already defined earlier in this enum.)
         MM_PDU_Type,
         MM_Address_extension,
         MM_Not_supported_PDU_type,
