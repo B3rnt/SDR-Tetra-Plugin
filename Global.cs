@@ -5,6 +5,13 @@ using System.Runtime.CompilerServices;
 
 namespace SDRSharp.Tetra
 {
+    public static class RuntimeState
+    {
+        public static readonly Stopwatch RunTime = Stopwatch.StartNew();
+        public static volatile int CurrentLocationArea = -1;
+        public static volatile string LogWriteFolder = string.Empty;
+    }
+
     public enum GlobalNames
     {
         Data_Separator = 0,
@@ -116,6 +123,7 @@ namespace SDRSharp.Tetra
         Monitoring_pattern,
         Frame_18_monitoring_pattern,
         MLE_PDU_Type,
+        MM_PDU_Type,
         LLC_Pdu_Type,
         CMCE_Primitives_Type,
         MLE_Primitives_Type,
@@ -134,6 +142,7 @@ namespace SDRSharp.Tetra
         Neighbour_MCC,
         Neighbour_MNC,
         Neighbour_LA,
+        EndOfData,
         TDMA_frame_offset,
         Timeshare_cell_and_AI_encryption,
         Minimum_RX_access_level,
@@ -286,42 +295,28 @@ namespace SDRSharp.Tetra
         T5_el_ident,
         T5_el_length,
         T5_el_length_ex,
-	        // Mobility Management (MM) logging / parsing,
-	        // (Registration_required is already defined earlier in this enum.)
-        MM_PDU_Type,
-        MM_Address_extension,
-        MM_Not_supported_PDU_type,
-        MM_SSI,
-        MM_GSSI,
-        MM_GSSI2,
-        MM_GSSI3,
-        MM_GSSI4,
-        MM_GSSI5,
-        MM_vGSSI,
-        Registrations_permitted,
-        Registrations_label,
-        Registration_phase_time_remaining,
-        Registration_access_parameter,
-        Registrations_forwarded_flag,
-        Registration_phase_terminated_flag,
 
-        // Added for MM registrations logfile
+        // --- Mobility Management (MM) ---
+        MM_PDU_Type,
         Authentication_sub_type,
         Location_update_accept_type,
-        CCK_identifier,
-        Reject_cause,
-
-	                Cipher_control,
-	        Ciphering_parameters,
         Location_update_type,
+        Reject_cause,
+        MM_SSI,
+        MM_GSSI,
+        CCK_identifier,
+        Status_downlink,
         Group_identity_report,
         Group_identity_acknowledgement_request,
         Group_identity_attach_detach_mode,
         Group_identity_accept_reject,
-        Status_downlink,
-End // Always must be here
+        Cipher_control,
+        Ciphering_parameters,
+        MM_Address_extension,
 
-}
+        End // Always must be here
+
+    }
 
     public class ReceivedData
     {
@@ -378,6 +373,11 @@ End // Always must be here
         {
             //Debug.WriteLineIf(Data[(int)name] != -1, "Value reused:" + name.ToString());
             Data[(int)name] = value;
+
+            if (name == GlobalNames.Location_Area)
+            {
+                RuntimeState.CurrentLocationArea = value;
+            }
         }
     }
 
@@ -847,8 +847,6 @@ End // Always must be here
     {
         public static bool IgnoreEncryptedSpeech;
 
-        public static string LogWriteFolder = "";
-        public static bool LogMmRegistrations = true;
         public static List<ReceivedData> NeighbourList = new List<ReceivedData>();
         private static int _currentBand;
         private static int _currentOffset;
@@ -1006,8 +1004,6 @@ End // Always must be here
         public string LogSeparator { get; set; }
 
         public bool LogEnabled { get; set; }
-
-        public bool LogMmRegistrations { get; set; }
 
         public int BlockedLevel { get; set; }
 

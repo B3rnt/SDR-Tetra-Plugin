@@ -18,16 +18,16 @@ namespace SDRSharp.Tetra
 
             switch (protokol)
             {
+                case MLEPduType.MM:
+                    _mm.Parse(channelData, offset, result);
+                    break;
+
                 case MLEPduType.CMCE:
                     ParseCMCEPDU(channelData, offset, result);
                     break;
 
                 case MLEPduType.MLE:
                     ParseMLEPDU(channelData, offset, result);
-                    break;
-
-                case MLEPduType.MM:
-                    _mm.Parse(channelData, offset, result);
                     break;
 
                 default:

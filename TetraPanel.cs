@@ -166,6 +166,9 @@ namespace SDRSharp.Tetra
                 _settingsPersister = new SettingsPersister("tetraSettings_" + instanceNumber + ".xml");
                 _tetraSettings = _settingsPersister.ReadStored();
 
+                // Make log folder available for the MM registrations logger.
+                RuntimeState.LogWriteFolder = _tetraSettings.LogWriteFolder;
+
                 
                 // Restore persisted frequency lock state
                 _frequencyLocked = _tetraSettings.FrequencyLocked;
@@ -1508,8 +1511,6 @@ private void UpdateLockUi()
         private void UpdateGlobals()
         {
             Global.IgnoreEncryptedSpeech = _tetraSettings.IgnoreEncodedSpeech;
-            Global.LogWriteFolder = _tetraSettings.LogWriteFolder;
-            Global.LogMmRegistrations = _tetraSettings.LogMmRegistrations;
         }
 
         private void BlockNumericUpDown_ValueChanged(object sender, EventArgs e)

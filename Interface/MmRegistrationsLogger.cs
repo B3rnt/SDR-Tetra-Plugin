@@ -1,132 +1,159 @@
 using System;
-using System.Collections.Generic;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Text;
 
 namespace SDRSharp.Tetra
 {
-    /// <summary>
-    /// Writes a dedicated Mobility Management (MM) registrations/authentication logfile.
-    /// Format is based on the user's provided reference file:
-    ///   TETRA_MM-Registrations_YYYY-MM-DD.txt
-    /// and line format:
-    ///  HH:MM:SS[space][LA: ####]   <message>
-    /// with a leading space before time and variable spacing before [LA: ].
-    /// </summary>
     internal static class MmRegistrationsLogger
     {
         private static readonly object _lock = new object();
 
-        // Relative time like 00:00:58
-        private static readonly Stopwatch _sw = Stopwatch.StartNew();
-
-        // Remember the last auth result text per SSI, because accept lines include it.
-        private static readonly Dictionary<int, string> _lastAuthBySsi = new Dictionary<int, string>();
-
-        private static string GetFilePath()
+        private static string GetFolder()
         {
-            string folder = "";
-            try { folder = Global.LogWriteFolder; } catch { }
-
-            if (string.IsNullOrEmpty(folder))
+            var folder = RuntimeState.LogWriteFolder;
+            if (string.IsNullOrWhiteSpace(folder))
             {
-                try { folder = AppDomain.CurrentDomain.BaseDirectory; } catch { folder = "."; }
+                folder = AppDomain.CurrentDomain.BaseDirectory;
             }
+            return folder;
+        }
 
-            try
-            {
-                if (!Directory.Exists(folder))
-                    Directory.CreateDirectory(folder);
-            }
-            catch
-            {
-                // ignore, will fail later on write if invalid
-            }
-
+        private static string FileNameForToday()
+        {
             var date = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-            var file = $"TETRA_MM-Registrations_{date}.txt";
-            return Path.Combine(folder, file);
+            return Path.Combine(GetFolder(), $"TETRA_MM-Registrations_{date}.txt");
         }
 
-        private static string ElapsedHms()
+        private static string FormatPrefix()
         {
-            var ts = _sw.Elapsed;
-            // match HH:MM:SS (hours can exceed 24; sample stays within)
-            int hours = (int)ts.TotalHours;
-            return string.Format(CultureInfo.InvariantCulture, "{0:00}:{1:00}:{2:00}", hours, ts.Minutes, ts.Seconds);
+            var ts = RuntimeState.RunTime.Elapsed;
+            string time = $"{(int)ts.TotalHours:00}:{ts.Minutes:00}:{ts.Seconds:00}";
+            int la = RuntimeState.CurrentLocationArea;
+            string laStr = la >= 0 ? la.ToString(CultureInfo.InvariantCulture) : "-";
+
+            // Leading space like the reference logs.
+            // Spacing rule: with 3-digit LA -> 2 spaces between time and [LA:], else 1 space.
+            int laDigits = (laStr == "-") ? 1 : laStr.Length;
+            string gap = (laDigits == 3) ? "  " : " ";
+            return $" {time}{gap}[LA: {laStr}]   ";
         }
 
-        private static string FormatPrefix(int la)
+        public static void Log(ReceivedData data)
         {
-            // User note: "2 spaties is alleen bij 3 cijferige LA, bij 4 cijferige LA of meer maar 1 spatie"
-            // i.e., after time: 2 spaces if LA has 3 digits; else 1 space.
-            int digits = (la >= 0) ? la.ToString(CultureInfo.InvariantCulture).Length : 1;
-            string gapAfterTime = (digits == 3) ? "  " : " ";
-            return " " + ElapsedHms() + gapAfterTime + "[LA: " + la.ToString(CultureInfo.InvariantCulture) + "]   ";
-        }
+            // Only log when we have an MM PDU.
+            if (!data.Contains(GlobalNames.MM_PDU_Type)) return;
 
-        private static int GetInt(ReceivedData data, GlobalNames name, int fallback = -1)
-        {
-            int v = 0;
-            return data.TryGetValue(name, ref v) ? v : fallback;
-        }
+            var mmType = (MmPduType)data.Value(GlobalNames.MM_PDU_Type);
 
-        private static int GetSsi(ReceivedData data)
-        {
-            int v = 0;
-            if (data.TryGetValue(GlobalNames.MM_SSI, ref v)) return v;
-            if (data.TryGetValue(GlobalNames.SSI, ref v)) return v;
-            return -1;
-        }
+            // SSI: prefer SSI, fallback to MM_SSI.
+            int ssi = -1;
+            if (!data.TryGetValue(GlobalNames.SSI, ref ssi))
+                data.TryGetValue(GlobalNames.MM_SSI, ref ssi);
 
-        private static int GetLa(ReceivedData data)
-        {
-            int v = 0;
-            if (data.TryGetValue(GlobalNames.Location_Area, ref v)) return v;
-            // fall back: some decoders use LAC / Location_area etc. Not in this codebase.
-            return -1;
-        }
+            if (ssi < 0) return; // reference log always has SSI
 
-        private static void AppendLine(string line)
-        {
-            var path = GetFilePath();
+            string line = BuildLine(mmType, ssi, data);
+            if (string.IsNullOrEmpty(line)) return;
+
             lock (_lock)
             {
-                File.AppendAllText(path, line + Environment.NewLine);
+                Directory.CreateDirectory(GetFolder());
+                File.AppendAllText(FileNameForToday(), FormatPrefix() + line + Environment.NewLine, Encoding.UTF8);
             }
         }
 
-        // Public entry: write a fully formatted MM line.
-        public static void LogMmLine(ReceivedData data, int ssi, string message)
+        private static string BuildLine(MmPduType mmType, int ssi, ReceivedData data)
         {
-            if (!Global.LogMmRegistrations) return;
-
-            int la = GetLa(data);
-            if (la < 0) la = 0;
-
-            // Ensure SSI is always present in the message like the reference file.
-            // Callers should include it where required; but we keep this here safe.
-            var prefix = FormatPrefix(la);
-            AppendLine(prefix + message);
-        }
-
-        public static void RememberAuthText(int ssi, string authText)
-        {
-            if (ssi <= 0) return;
-            lock (_lock)
+            // Strings are based on the provided reference log file.
+            switch (mmType)
             {
-                _lastAuthBySsi[ssi] = authText ?? string.Empty;
+                case MmPduType.D_AUTHENTICATION:
+                    // We don't perfectly reconstruct all subtypes; match the observed ones.
+                    // If Authentication_sub_type==0 => demands authentication, else => result.
+                    int sub = -1;
+                    data.TryGetValue(GlobalNames.Authentication_sub_type, ref sub);
+                    if (sub == 0 || sub == -1)
+                    {
+                        return $"BS demands authentication: SSI: {ssi}";
+                    }
+                    return $"BS result to MS authentication: Authentication successful or no authentication currently in progress SSI: {ssi} - Authentication successful or no authentication currently in progress";
+
+                case MmPduType.D_LOCATION_UPDATE_ACCEPT:
+                {
+                    int gssi = -1;
+                    data.TryGetValue(GlobalNames.MM_GSSI, ref gssi);
+                    int cck = -1;
+                    if (data.TryGetValue(GlobalNames.CCK_identifier, ref cck))
+                    {
+                        cck &= 0xF; // in the reference log it's a 0-15 value (e.g. 14)
+                    }
+                    int acceptType = -1;
+                    data.TryGetValue(GlobalNames.Location_update_accept_type, ref acceptType);
+
+                    string acceptText = (acceptType == 0) ? "MS request for registration/authentication ACCEPTED" : "MS request for registration ACCEPTED";
+                    string locUpd = LocationUpdateAcceptTypeToText(acceptType);
+                    var sb = new StringBuilder();
+                    sb.Append(acceptText);
+                    sb.Append($" for SSI: {ssi}");
+                    if (gssi >= 0) sb.Append($" GSSI: {gssi}");
+                    sb.Append(" - Authentication successful or no authentication currently in progress");
+                    if (cck >= 0) sb.Append($" - CCK_identifier: {cck}");
+                    if (!string.IsNullOrEmpty(locUpd)) sb.Append($" - {locUpd}");
+                    return sb.ToString();
+                }
+
+                case MmPduType.D_LOCATION_UPDATE_REJECT:
+                {
+                    int luType = -1;
+                    data.TryGetValue(GlobalNames.Location_update_type, ref luType);
+                    int cause = -1;
+                    data.TryGetValue(GlobalNames.Reject_cause, ref cause);
+                    string locUpd = LocationUpdateTypeToText(luType);
+                    string causeText = RejectCauseToText(cause);
+                    var sb = new StringBuilder();
+                    sb.Append($"MS updating in the network is NOT ACCEPTED for SSI: {ssi}");
+                    if (!string.IsNullOrEmpty(locUpd)) sb.Append($" - {locUpd}");
+                    if (!string.IsNullOrEmpty(causeText)) sb.Append($" CAUSE: {causeText}");
+                    return sb.ToString();
+                }
+
+                default:
+                    return null;
             }
         }
 
-        public static string GetLastAuthText(int ssi)
+        private static string LocationUpdateAcceptTypeToText(int acceptType)
         {
-            lock (_lock)
+            // Minimal mapping for the values observed in the sample file.
+            // 0 appears to correspond to roaming location updating in the sample.
+            return acceptType switch
             {
-                if (ssi > 0 && _lastAuthBySsi.TryGetValue(ssi, out var t)) return t;
-            }
-            return string.Empty;
+                0 => "Roaming location updating",
+                1 => "Roaming location updating",
+                _ => ""
+            };
+        }
+
+        private static string LocationUpdateTypeToText(int luType)
+        {
+            return luType switch
+            {
+                0 => "Roaming location updating",
+                1 => "Roaming location updating",
+                _ => ""
+            };
+        }
+
+        private static string RejectCauseToText(int cause)
+        {
+            // Values depend on network; we map the ones from the provided example file.
+            return cause switch
+            {
+                0 => "LA not allowed (LA rejection)",
+                1 => "ITSI/ATSI unknown (system rejection)",
+                _ => cause.ToString(CultureInfo.InvariantCulture)
+            };
         }
     }
 }

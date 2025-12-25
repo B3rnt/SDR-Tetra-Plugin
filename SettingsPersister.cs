@@ -23,7 +23,7 @@ namespace SDRSharp.Tetra
             {
                 return result;
             }
-            return new TetraSettings(){ LogMmRegistrations = true };
+            return new TetraSettings();
         }
 
         public void PersistStored(TetraSettings entries)
