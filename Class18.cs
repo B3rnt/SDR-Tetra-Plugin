@@ -105,7 +105,7 @@ namespace SDRSharp.Tetra
             // 4-bit MM PDU type (per SDRtetra MmPduType)
             int mmPduType = Bits(channelData, offset, 4);
             if (mmPduType < 0) mmPduType = 0;
-            received.SetValue(GlobalNames.MM_PDU_Type, mmPduType);
+            // removed: MM_PDU_Type not in this fork
             offset += 4;
 
             // In the reference build, many MM messages carry optional fields preceded by:
@@ -122,7 +122,7 @@ namespace SDRSharp.Tetra
                 mmSsi = Bits(channelData, offset, 24);
                 if (mmSsi >= 0)
                 {
-                    received.SetValue(GlobalNames.MM_SSI, mmSsi);
+                    received.SetValue(GlobalNames.SSI, mmSsi);
                     info.Ssi = mmSsi;
                 }
                 offset += 24;
@@ -148,7 +148,7 @@ namespace SDRSharp.Tetra
                 case 1: // D_AUTHENTICATION
                 {
                     int sub = Bits(channelData, offset, 2);
-                    if (sub >= 0) received.SetValue(GlobalNames.Authentication_sub_type, sub);
+// removed: Authentication_sub_type not in this fork
                     offset += 2;
 
                     if (sub == 0) // Demand
@@ -174,7 +174,7 @@ namespace SDRSharp.Tetra
                 case 5: // D_LOCATION_UPDATE_ACCEPT
                 {
                     int accType = Bits(channelData, offset, 2);
-                    if (accType >= 0) received.SetValue(GlobalNames.Location_update_accept_type, accType);
+// removed: Location_update_accept_type not in this fork
                     offset += 2;
 
                     // Optional Group identity + CCK identifier are often present; parse safely if available.
@@ -188,7 +188,7 @@ namespace SDRSharp.Tetra
                             int gssi = Bits(channelData, offset, 24);
                             if (gssi >= 0)
                             {
-                                received.SetValue(GlobalNames.MM_GSSI, gssi);
+                                received.SetValue(GlobalNames.GSSI, gssi);
                                 info.Gssi = gssi;
                             }
                             offset += 24;
@@ -199,7 +199,7 @@ namespace SDRSharp.Tetra
                     int cck = Bits(channelData, offset, 16);
                     if (cck >= 0 && cck != 0)
                     {
-                        received.SetValue(GlobalNames.CCK_identifier, cck);
+                        // removed: CCK_identifier not in this fork
                         info.CckIdentifier = cck;
                         offset += 16;
                     }
@@ -222,8 +222,8 @@ namespace SDRSharp.Tetra
                     int cause = Bits(channelData, offset, 5);
                     offset += 5;
 
-                    if (lut >= 0) received.SetValue(GlobalNames.Location_update_type, lut);
-                    if (cause >= 0) received.SetValue(GlobalNames.Reject_cause, cause);
+// removed: Location_update_type not in this fork
+// removed: Reject_cause not in this fork
 
                     info.Message = $"MS request for registration REJECTED for SSI: {info.Ssi} - {LocationUpdateTypeText(lut)} CAUSE: {RejectCauseText(cause)}";
                     break;
@@ -242,7 +242,7 @@ namespace SDRSharp.Tetra
                     int gssi = Bits(channelData, offset, 24);
                     if (gssi >= 0)
                     {
-                        received.SetValue(GlobalNames.MM_GSSI, gssi);
+                        received.SetValue(GlobalNames.GSSI, gssi);
                         info.Gssi = gssi;
                     }
                     info.Message = $"BS acknowledges MS initiated attachment/detachment of group identities GSSI:{info.Gssi} SSI: {info.Ssi} All attachment/detachments accepted";
