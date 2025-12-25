@@ -62,6 +62,10 @@ namespace SDRSharp.Tetra
         private bool _decodingIsStarted;
 
         private double _iqSamplerate;
+        // Track the input sample rate used to initialize the per-channel decimator.
+        // When SDR# sample rate changes (e.g., SpyServer rate switch), we rebuild the
+        // decimator for this channel.
+        private double _lastDecimatorInputRate = -1;
         private bool _processIsStarted;
         private int _lostBuffers;
         private bool _dispayBufferReady;
