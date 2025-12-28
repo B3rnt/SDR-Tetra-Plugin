@@ -1,7 +1,9 @@
+using System;
+
 namespace SDRSharp.Tetra
 {
-    // MM PDU type mapping (4 bits) – matches the reference SDRtetra project.
-    internal enum MmPduType
+    // ETSI EN 300 392-2 Mobility Management PDU type (downlink)
+    public enum MmPduType
     {
         D_OTAR = 0,
         D_AUTHENTICATION = 1,

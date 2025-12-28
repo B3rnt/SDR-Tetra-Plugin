@@ -29,15 +29,11 @@ namespace SDRSharp.Tetra
         private const int ChannelActiveDelay = 10;
 
         private ISharpControl _controlInterface;
-        private SharedStreamHub _streamHub;
+        private IFProcessor _ifProcessor;
         private Demodulator _demodulator;
         private TetraDecoder _decoder;
 
         private UnsafeBuffer _iqBuffer;
-        private UnsafeBuffer _iqDecimBuffer;
-        private Complex* _iqDecimPtr;
-        private MultiStageDecimator _decimator;
-        private const double TetraTargetSampleRate = 25000.0;
         private Complex* _iqBufferPtr;
         private UnsafeBuffer _symbolsBuffer;
         private float* _symbolsBufferPtr;
@@ -55,17 +51,10 @@ namespace SDRSharp.Tetra
 
         private double _audioSamplerate;
 
-        // UI: shown when the locked frequency is outside the current received IQ bandwidth.
-        private Label _lockOutOfRangeLabel;
-
         private Thread _decodingThread;
         private bool _decodingIsStarted;
 
         private double _iqSamplerate;
-        // Track the input sample rate used to initialize the per-channel decimator.
-        // When SDR# sample rate changes (e.g., SpyServer rate switch), we rebuild the
-        // decimator for this channel.
-        private double _lastDecimatorInputRate = -1;
         private bool _processIsStarted;
         private int _lostBuffers;
         private bool _dispayBufferReady;
@@ -76,7 +65,7 @@ namespace SDRSharp.Tetra
 
         private bool _needDisplayBufferUpdate;
 
-        // Stream data comes from SharedStreamHub (single SDR# hook), not per-panel hooks.
+        private AudioProcessor _audioProcessor;
 
         private bool _showInfo;
         private bool _needCloseInfo;
@@ -96,8 +85,6 @@ namespace SDRSharp.Tetra
         private int _activeCounter4;
 
         private NetInfoWindow _infoWindow;
-
-        private double _lastIqSampleRate;
 
         private List<ReceivedData> _rawData = new List<ReceivedData>();
         private List<ReceivedData> _cmceData = new List<ReceivedData>();
@@ -130,32 +117,16 @@ namespace SDRSharp.Tetra
         private int _afcCounter;
         private double _freqError;
         private float _averageAngle;
-        // AFC correction is applied internally (digital tuning) so we never retune
-        // SDR# itself. Retuning SDR# (changing control.Frequency) causes the
-        // waterfall/FFT to jump and makes frequencies unreliable.
-        private double _afcCorrectionHz;
+        private bool _isAfcWork;
         private Mode _tetraMode;
         private UnsafeBuffer _diBitsBuffer;
         private unsafe byte* _diBitsBufferPtr;
 
-        // --- Frequency lock (AuxVFO-style) ---
-        // When enabled, the plugin keeps decoding on _lockedFrequency by
-        // digitally shifting the wideband IQ stream.
-        private bool _frequencyLocked;
-        private long _lockedFrequency;
-        // Per-channel working frequency. This must NOT follow SDR# mouse clicks/VFO movements.
-        // It is only updated explicitly by the user ("Kies deze frequentie") or on first start.
-        private long _selectedFrequency;
-        private bool _hasSelectedFrequency;
-        private double _ncoPhase;        private double _ncoSampleRate;
-
-        // UI elements created at runtime (so we don't have to touch the designer)
-        private Button _lockFrequencyButton;
-        private Label _lockFrequencyStatusLabel;        private const int CallTimeout = 10;
+        private const int CallTimeout = 10;
         private int _currentChPriority;
 
         #region Init and store settings
-        public unsafe TetraPanel(ISharpControl control, int instanceNumber)
+        public unsafe TetraPanel(ISharpControl control)
         {
             try
             {
@@ -163,29 +134,10 @@ namespace SDRSharp.Tetra
 
                 InitArrays();
 
-                _settingsPersister = new SettingsPersister("tetraSettings_" + instanceNumber + ".xml");
+                _settingsPersister = new SettingsPersister("tetraSettings.xml");
                 _tetraSettings = _settingsPersister.ReadStored();
 
-                
-            // Force MM registrations logging ON by default
-            if (_tetraSettings != null) _tetraSettings.LogMmRegistrations = true;
-// MM registration logging (default ON if missing in settings)
-                Global.LogMmRegistrations = (_tetraSettings != null) ? _tetraSettings.LogMmRegistrations : true;
-
-                // Expose log folder for MM registrations logger (some implementations expect it on Global)
-                Global.LogWriteFolder = (_tetraSettings != null) ? (_tetraSettings.LogWriteFolder ?? string.Empty) : string.Empty;
-
-                                Global.Settings = _tetraSettings;
-            Global.LogMmRegistrations = true;
-// Restore persisted frequency lock state
-                _frequencyLocked = _tetraSettings.FrequencyLocked;
-                _lockedFrequency = _tetraSettings.LockedFrequency;
-                if (_lockedFrequency != 0)
-                {
-                    _selectedFrequency = _lockedFrequency;
-                    _hasSelectedFrequency = true;
-                }
-#region Default Settings
+                #region Default Settings
                 if (_tetraSettings.LogEntryRules == null || _tetraSettings.LogEntryRules == string.Empty)
                     _tetraSettings.LogEntryRules = DefaultLogEntryRules;
 
@@ -210,18 +162,16 @@ namespace SDRSharp.Tetra
 
                 _controlInterface = control;
 
-                // Add a simple "Kies deze frequentie" button like AuxVFO.
-                // This locks the plugin on the currently selected frequency.
-                CreateFrequencyLockUi();
-
                 _infoWindow = new NetInfoWindow();
                 _infoWindow.FormClosing += _infoWindow_FormClosing;
 
-                // IMPORTANT: do NOT register stream hooks per window. That can freeze SDR#'s waterfall.
-                // Instead, subscribe to a shared hub that registers hooks exactly once.
-                _streamHub = SharedStreamHub.GetOrCreate(_controlInterface);
-                _streamHub.IQReady += IQSamplesAvailable;
-                _streamHub.AudioReady += AudioSamplesNedeed;
+                _ifProcessor = new IFProcessor();
+                _controlInterface.RegisterStreamHook(_ifProcessor, ProcessorType.DecimatedAndFilteredIQ);
+                _ifProcessor.IQReady += IQSamplesAvailable;
+
+                _audioProcessor = new AudioProcessor();
+                _controlInterface.RegisterStreamHook(_audioProcessor, ProcessorType.DemodulatorOutput);
+                _audioProcessor.AudioReady += AudioSamplesNedeed;
 
                 _decoder = new TetraDecoder(this);
                 _decoder.DataReady += _decoder_DataReady;
@@ -254,172 +204,6 @@ namespace SDRSharp.Tetra
             {
                 _currentCellLoad[i] = new CurrentLoad();
             }
-        }
-
-        private void CreateFrequencyLockUi()
-        {
-            try
-            {
-                // The designer contains a "label11" placeholder that isn't used for decoding.
-                // Hide it so we can place our controls without editing the .Designer.cs.
-                label11.Visible = false;
-
-                _lockFrequencyButton = new Button
-                {
-                    Text = "Kies deze frequentie",
-                    Width = 125,
-                    Height = 23,
-                    Location = new Point(85, 95),
-                    Anchor = AnchorStyles.Top | AnchorStyles.Right
-                };
-                _lockFrequencyButton.Click += LockFrequencyButton_Click;
-                groupBox2.Controls.Add(_lockFrequencyButton);
-
-                _lockOutOfRangeLabel = new Label
-                {
-                    AutoSize = true,
-                    Location = new Point(14, 118),
-                    Text = ""
-                };
-                groupBox2.Controls.Add(_lockOutOfRangeLabel);
-
-                _lockFrequencyStatusLabel = new Label
-                {
-                    AutoSize = true,
-                    Location = new Point(14, 100),
-                    Text = "Lock: uit"
-                };
-                groupBox2.Controls.Add(_lockFrequencyStatusLabel);UpdateLockUi();
-            }
-            catch
-            {
-                // If the host SDR# version has a different designer layout, we simply skip the extra UI.
-            }
-        }
-        private void LockFrequencyButton_Click(object sender, EventArgs e)
-        {
-            // Toggle lock: first click locks to current selected frequency; second click unlocks.
-            if (_frequencyLocked)
-            {
-                _frequencyLocked = false;
-            }
-            else
-            {
-                // Snapshot the current SDR# frequency only when the user explicitly asks.
-                _lockedFrequency = _controlInterface.Frequency;
-                _selectedFrequency = _lockedFrequency;
-                _hasSelectedFrequency = true;
-                _frequencyLocked = true;
-                ResetDecoder();
-            }
-            UpdateLockUi();
-        }
-
-private void UpdateLockUi()
-{
-    try
-    {
-        if (_lockFrequencyStatusLabel == null || _lockFrequencyButton == null)
-        {
-            return;
-        }
-
-        if (_frequencyLocked)
-        {
-            _lockFrequencyStatusLabel.Text = string.Format(CultureInfo.InvariantCulture,
-                "Lock: aan ({0:0.000000} MHz)", _lockedFrequency / 1e6);
-            _lockFrequencyButton.Text = "Unlock";
-        }
-        else
-        {
-            _lockFrequencyStatusLabel.Text = "Lock: uit";
-            _lockFrequencyButton.Text = "Kies deze frequentie";
-        }
-
-        if (_lockOutOfRangeLabel != null)
-        {
-            if (_frequencyLocked && _lastIqSampleRate > 0)
-            {
-                var center = _controlInterface.CenterFrequency;
-                var half = _lastIqSampleRate / 2.0;
-                var offset = Math.Abs(_lockedFrequency - center);
-                _lockOutOfRangeLabel.Text = (offset > half)
-                    ? "⚠ Buiten band (verhoog samplerate of retune center)"
-                    : string.Empty;
-            }
-            else
-            {
-                _lockOutOfRangeLabel.Text = string.Empty;
-            }
-        }
-    }
-    catch
-    {
-        // ignore UI update failures
-    }
-}
-
-
-        private long GetTargetFrequencyHz()
-        {
-            if (_frequencyLocked)
-                return _lockedFrequency;
-
-            // When unlocked, do NOT follow SDR# frequency changes.
-            // Use the last explicitly selected frequency (or initial snapshot).
-            if (_hasSelectedFrequency)
-                return _selectedFrequency;
-
-            // Fallback (should only happen before first start)
-            return _controlInterface.Frequency;
-        }
-
-        private int GetBurstSamples(double sampleRate)
-        {
-            // We need enough IQ samples to cover one TETRA burst (255 symbols) at the current sample rate.
-            // Add a small safety margin.
-            var n = (int)Math.Round((sampleRate / 18000.0) * BurstLengthSymbols * 1.15);
-            return Math.Max(512, n);
-        }
-
-        private unsafe void FrequencyTranslate(Complex* buffer, int length, double sampleRate, long targetFrequency)
-        {
-            // Translate the chosen (locked) frequency to baseband (0 Hz) based on the current spectrum center.
-            // If CenterFrequency isn't available, fall back to Frequency.
-            long center;
-            try { center = _controlInterface.CenterFrequency; }
-            catch { center = _controlInterface.Frequency; }
-
-            // Include AFC correction (internal only)
-            var offsetHz = (double)(targetFrequency - center) + _afcCorrectionHz;
-
-            if (_ncoSampleRate != sampleRate)
-            {
-                _ncoSampleRate = sampleRate;
-                _ncoPhase = 0;
-            }
-
-            // exp(-j*2*pi*offset/sampleRate)
-            var step = -TwoPi * (float)(offsetHz / sampleRate);
-
-            float phase = (float)_ncoPhase;
-            for (int i = 0; i < length; i++)
-            {
-                var c = buffer[i];
-                var cs = (float)Math.Cos(phase);
-                var sn = (float)Math.Sin(phase);
-
-                // complex multiply: c * (cs + j*sn)
-                var re = c.Real * cs - c.Imag * sn;
-                var im = c.Real * sn + c.Imag * cs;
-                buffer[i].Real = re;
-                buffer[i].Imag = im;
-
-                phase += step;
-                if (phase > TwoPi) phase -= TwoPi;
-                else if (phase < -TwoPi) phase += TwoPi;
-            }
-            _ncoPhase = phase;
         }
 
         private Dictionary<int, NetworkEntry> NetworkBaseDeserializer(List<GroupsEntries> list)
@@ -492,8 +276,6 @@ private void UpdateLockUi()
             if (_processIsStarted) StopDecoding();
             _tetraSettings.AutoPlay = autoCheckBox.Checked;
             _tetraSettings.NetworkBase = NetworkBaseSerializer(_networkBase);
-            _tetraSettings.FrequencyLocked = _frequencyLocked;
-            _tetraSettings.LockedFrequency = _lockedFrequency;
             _settingsPersister.PersistStored(_tetraSettings);
         }
 
@@ -508,11 +290,11 @@ private void UpdateLockUi()
                     break;
 
                 case "Frequency":
-                    // Do not follow SDR# frequency changes. The channel uses its own
-                    // internal target frequency (selected/locked).
-                    // We only clear AFC accumulators here.
-                    _afcCounter = 0;
-                    _averageAngle = 0;
+                    if (!_isAfcWork)
+                    {
+                        ResetDecoder();
+                    }
+                    _isAfcWork = false;
                     break;
 
                 case "DetectorType":
@@ -526,9 +308,6 @@ private void UpdateLockUi()
             _resetCounter = 10;
 
             _freqError = 0;
-            _afcCorrectionHz = 0;
-            _afcCounter = 0;
-            _averageAngle = 0;
 
             _currentCell_NMI = 0;
             _currentCell_MNC = 0;
@@ -552,8 +331,7 @@ private void UpdateLockUi()
 
             _needGroupsUpdate = true;
 
-            var f = GetTargetFrequencyHz();
-            _currentCell_Carrier = (int)Math.Round((f % 100000000) / 25000.0);
+            _currentCell_Carrier = (int)Math.Round((_controlInterface.Frequency % 100000000) / 25000.0);
 
             _sysInfo.Clear();
             _currentCalls.Clear();
@@ -572,6 +350,8 @@ private void UpdateLockUi()
 
         private void StartDecoding()
         {
+            _ifProcessor.Enabled = true;
+
             _processIsStarted = true;
 
             DecoderStart();
@@ -579,6 +359,8 @@ private void UpdateLockUi()
 
         private void StopDecoding()
         {
+            _ifProcessor.Enabled = false;
+
             _processIsStarted = false;
 
             DecoderStop();
@@ -589,27 +371,12 @@ private void UpdateLockUi()
          */
         private bool CheckConditions()
         {
-            // IMPORTANT:
-            // Do NOT change SDR# global demodulator/tuning settings here.
-            // Doing so makes the waterfall/jumps and makes frequency readouts unreliable.
-            // We do our own internal tuning (frequency translation) per channel.
-            // We only require that SDR# is already running and providing IQ.
-            // Calling StartRadio() here can restart parts of SDR# and cause visible
-            // jumps in the waterfall / frequency display.
+            this._ifProcessor.SampleRate = 25000;
+            this._controlInterface.StartRadio();
+            this._controlInterface.DetectorType = DetectorType.WFM;
+            this._controlInterface.FrequencyShift = 28000;
 
-            if (_lastIqSampleRate == 0)
-            {
-                MessageBox.Show(
-                    "Start the radio first (press Play) and make sure IQ is flowing before enabling the TETRA demodulator channel.",
-                    "TETRA plugin",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return false;
-            }
-
-            // We no longer own the IFProcessor (it lives in SharedStreamHub), so we can't rely
-            // on its SampleRate property here. Instead, use the incoming IQ samplerate.
-            if (_lastIqSampleRate < 25000)
+            if (_ifProcessor.SampleRate < 25000)
             {
                 if (System.Globalization.CultureInfo.CurrentCulture.Name == "ru-RU")
                 {
@@ -635,7 +402,6 @@ private void UpdateLockUi()
         /// <param name="length"></param>
         public unsafe void IQSamplesAvailable(Complex* samples, double samplerate, int length)
         {
-            _lastIqSampleRate = samplerate;
             this._iqSamplerate = samplerate;
             if (this._radioFifoBuffer == null)
                 this._radioFifoBuffer = new ComplexFifoStream(BlockMode.None);
@@ -690,11 +456,14 @@ private void UpdateLockUi()
             };
             _decodingThread.Start();
 
+            _audioProcessor.Enabled = true;
             _needDisplayBufferUpdate = true;
         }
 
         private void DecoderStop()
         {
+            _audioProcessor.Enabled = false;
+
             _decodingIsStarted = false;
 
             if (_decodingThread != null)
@@ -702,8 +471,7 @@ private void UpdateLockUi()
                 _decodingThread.Join();
                 _decodingThread = null;
             }
-            // Do not touch SDR# global audio state from the plugin.
-            // In multi-channel mode this can cause DSP/UI chain reconfiguration.
+            _controlInterface.AudioIsMuted = false;
         }
 
         /**
@@ -713,9 +481,7 @@ private void UpdateLockUi()
          */
         private unsafe void DecodingThread()
         {
-            // Allocate dynamically based on actual samplerate.
-            var burstSamples = GetBurstSamples(_iqSamplerate == 0 ? 25000 : _iqSamplerate);
-            _iqBuffer = UnsafeBuffer.Create(burstSamples, sizeof(Complex));
+            _iqBuffer = UnsafeBuffer.Create(SamplesPerBurst, sizeof(Complex));
             _iqBufferPtr = (Complex*)_iqBuffer;
 
             _symbolsBuffer = UnsafeBuffer.Create(BurstLengthSymbols, sizeof(float));
@@ -734,22 +500,7 @@ private void UpdateLockUi()
             };
             while (this._decodingIsStarted)
             {
-                if (_iqSamplerate == 0)
-                {
-                    Thread.Sleep(10);
-                    continue;
-                }
-
-                burstSamples = GetBurstSamples(_iqSamplerate);
-
-                // Re-allocate IQ buffer if samplerate changed and we now need more/less samples per burst.
-                if (_iqBuffer == null || _iqBuffer.Length != burstSamples)
-                {
-                    _iqBuffer = UnsafeBuffer.Create(burstSamples, sizeof(Complex));
-                    _iqBufferPtr = (Complex*)_iqBuffer;
-                }
-
-                if ((_radioFifoBuffer == null) || (_radioFifoBuffer.Length < burstSamples))
+                if ((_radioFifoBuffer == null) || (_radioFifoBuffer.Length < SamplesPerBurst) || (_iqSamplerate == 0))
                 {
                     Thread.Sleep(10);
                     continue;
@@ -765,27 +516,8 @@ private void UpdateLockUi()
                 ///BurstLengthBits -> 510
                 ///Con 1024 no encuentra los paquetes!!!
 
-                this._radioFifoBuffer.Read(this._iqBufferPtr, burstSamples);
-
-                // Digitally tune to either the locked frequency or the current selected frequency.
-                FrequencyTranslate(this._iqBufferPtr, burstSamples, this._iqSamplerate, GetTargetFrequencyHz());
-
-                // Resample/decimate to the original demodulator target sample rate (25 kHz).
-                if (_decimator == null || Math.Abs(_iqSamplerate - _lastDecimatorInputRate) > 1e-6)
-                {
-                    _lastDecimatorInputRate = _iqSamplerate;
-                    _decimator = new MultiStageDecimator(_iqSamplerate, TetraTargetSampleRate, burstSamples);
-                    // Allocate enough room for the decimated burst (worst-case input/1).
-                    if (_iqDecimBuffer == null || _iqDecimBuffer.Length < burstSamples)
-                    {
-                        _iqDecimBuffer = UnsafeBuffer.Create(burstSamples, sizeof(Complex));
-                        _iqDecimPtr = (Complex*)_iqDecimBuffer;
-                    }
-                }
-
-                var decLen = _decimator.Process(this._iqBufferPtr, burstSamples, _iqDecimPtr, burstSamples);
-
-                this._demodulator.ProcessBuffer(burst, _iqDecimPtr, TetraTargetSampleRate, decLen, this._symbolsBufferPtr);
+                this._radioFifoBuffer.Read(this._iqBufferPtr, BurstLengthBits);
+                this._demodulator.ProcessBuffer(burst, this._iqBufferPtr, this._iqSamplerate, BurstLengthBits, this._symbolsBufferPtr);
                 /// END CRITICAL
 
                 if (burst.Type == BurstType.WaitBurst)
@@ -1213,7 +945,7 @@ private void UpdateLockUi()
                 _mainCell_Frequency = Global.FrequencyCalc(isFull, carrier, band, offset);
                 _mainCell_Carrier = carrier;
 
-                _currentCell_Carrier = Global.CarrierCalc(GetTargetFrequencyHz());
+                _currentCell_Carrier = Global.CarrierCalc(_controlInterface.Frequency);
             }
         }
 
@@ -1338,7 +1070,7 @@ private void UpdateLockUi()
                 }
             }
 
-            // Do not change SDR# global audio mute state.
+            _controlInterface.AudioIsMuted = !(_channel1Listen || _channel2Listen || _channel3Listen || _channel4Listen);
 
             if (_decoder != null)
             {
@@ -1353,8 +1085,7 @@ private void UpdateLockUi()
                 mainCarrierLabel.Text = _mainCell_Carrier.ToString();
                 mainFrequencyLinkLabel.Text = string.Format("{0:0,0.000###} MHz", _mainCell_Frequency * 0.000001m);
                 currentCarrierLabel.Text = _currentCell_Carrier.ToString();
-                currentFrequencyLabel.Text = string.Format("{0:0,0.000###} MHz", GetTargetFrequencyHz() * 0.000001m);
-                UpdateLockUi();
+                currentFrequencyLabel.Text = string.Format("{0:0,0.000###} MHz", _controlInterface.Frequency * 0.000001m);
             }
         }
 
@@ -1366,16 +1097,6 @@ private void UpdateLockUi()
                 {
                     enabledCheckBox.Checked = false;
                     return;
-                }
-
-                // Snapshot the SDR# frequency once on start (only if the user
-                // hasn't explicitly chosen a frequency yet). From now on we
-                // do NOT follow SDR# mouse clicks/VFO moves unless the user
-                // presses "Kies deze frequentie".
-                if (!_hasSelectedFrequency)
-                {
-                    _selectedFrequency = _controlInterface.Frequency;
-                    _hasSelectedFrequency = true;
                 }
 
                 ResetDecoder();
@@ -1527,18 +1248,7 @@ private void UpdateLockUi()
 
         private void MainFrequencyLinkLabel_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
         {
-            // Do not retune SDR# globally; just set this channel's target frequency.
-            if (_mainCell_Frequency <= 0) return;
-
-            _selectedFrequency = _mainCell_Frequency;
-            _hasSelectedFrequency = true;
-
-            // Also lock to it (explicit user action).
-            _lockedFrequency = _mainCell_Frequency;
-            _frequencyLocked = true;
-
-            ResetDecoder();
-            UpdateLockUi();
+            _controlInterface.Frequency = _mainCell_Frequency;
         }
 
         #endregion
@@ -1858,9 +1568,8 @@ private void UpdateLockUi()
             {
                 if (_freqError > 200 || _freqError < -200)
                 {
-                    // Apply AFC internally by adjusting the digital mixer offset.
-                    // Never retune SDR# itself here (would make waterfall jump).
-                    _afcCorrectionHz += _freqError;
+                    _isAfcWork = true;
+                    _controlInterface.Frequency += (long)_freqError;
                     _freqError = 0;
                 }
             }

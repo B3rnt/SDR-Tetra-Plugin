@@ -287,6 +287,24 @@ namespace SDRSharp.Tetra
         T5_el_ident,
         T5_el_length,
         T5_el_length_ex,
+        MM_PDU_Type,
+        Otar_sub_type,
+        Authentication_sub_type,
+        CK_provision_flag,
+        Status_downlink,
+        Not_supported_sub_PDU_type,
+        Location_update_accept_type,
+        Location_update_type,
+        MM_SSI,
+        MM_Address_extension,
+        MM_vGSSI,
+        Cipher_control,
+        Ciphering_parameters,
+        Reject_cause,
+        Group_identity_report,
+        Group_identity_acknowledgement_request,
+        Group_identity_accept_reject,
+        Group_identity_attach_detach_mode,
         End // Always must be here
 
     }
@@ -813,15 +831,7 @@ namespace SDRSharp.Tetra
 
     unsafe static class Global
     {
-        // MM Registrations logging (default ON)
-        public static bool LogMmRegistrations = true;
-
-        // Folder where log files should be written. Set from TetraPanel after settings are loaded.
-        public static string LogWriteFolder = string.Empty;
-
-        
-        public static TetraSettings Settings;
-public static bool IgnoreEncryptedSpeech;
+        public static bool IgnoreEncryptedSpeech;
 
         public static List<ReceivedData> NeighbourList = new List<ReceivedData>();
         private static int _currentBand;
@@ -857,13 +867,11 @@ public static bool IgnoreEncryptedSpeech;
                         continue;
 
                     case RulesType.Options_bit:
-                        // In the reference implementation, Options_bit does not abort parsing.
-                        // When 0, it means "options absent" and the following optional rules can be skipped.
+                        offset += param.Length;
                         if (value == 0)
                         {
-                            skipRules = param.Ext1;
+                            return offset;
                         }
-                        offset += param.Length;
                         break;
 
                     case RulesType.Presence_bit:
@@ -973,14 +981,6 @@ public static bool IgnoreEncryptedSpeech;
     }
     public class TetraSettings
     {
-        public TetraSettings()
-        {
-            // Default ON to match reference plugin behavior
-            LogMmRegistrations = true;
-        }
-
-        public bool LogMmRegistrations { get; set; }
-
         public string LogFileNameRules { get; set; }
 
         public string LogWriteFolder { get; set; }
@@ -1006,12 +1006,5 @@ public static bool IgnoreEncryptedSpeech;
         public int UdpPort { get; set; }
 
         public bool AfcDisabled { get; set; }
-
-        // Frequency lock (persisted)
-        public bool FrequencyLocked { get; set; }
-
-        // Locked frequency in Hz
-        public long LockedFrequency { get; set; }
-
     }
 }

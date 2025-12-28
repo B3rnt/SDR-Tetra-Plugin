@@ -6,6 +6,7 @@ namespace SDRSharp.Tetra
     unsafe class MleLevel
     {
         private SdsParser _sds = new SdsParser();
+        private MmLevel _mm = new MmLevel();
 
         public void Parse(LogicChannel channelData, int offset, ReceivedData result)
         {
@@ -26,30 +27,10 @@ namespace SDRSharp.Tetra
                     break;
 
                 case MLEPduType.MM:
-                    // Mobility Management
-                    MmInfo mmInfo = null;
-                    try
-                    {
-                        mmInfo = Class18.ParseMm(channelData, offset, result);
-                    }
-                    catch (System.Exception ex)
-                    {
-                        // Ensure we still create a log line for troubleshooting
-                        mmInfo = new MmInfo { Message = "MM: parse exception - " + ex.GetType().Name };
-                        System.Diagnostics.Debug.WriteLine(ex.ToString());
-                    }
-
-                    if (mmInfo == null || string.IsNullOrEmpty(mmInfo.Message))
-                    {
-                        // Fallback: log that an MM PDU was seen
-                        mmInfo = mmInfo ?? new MmInfo();
-                        int pduType = TetraUtils.BitsToInt32(channelData.Ptr, offset, 4);
-                        mmInfo.Message = "MM: PDU_Type=" + pduType.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                    }
-
-                    MmRegLogWriter.TryLog(mmInfo, Global.Settings);
+                    _mm.Parse(channelData, offset, result);
                     break;
-default:
+
+                default:
                     //Debug.Write(" Unknow_PDU_Type");
                     result.Add(GlobalNames.UnknowData, 1);
                     break;
