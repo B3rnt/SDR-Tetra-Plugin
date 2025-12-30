@@ -1,5 +1,6 @@
 ﻿using SDRSharp.Common;
 using System.Windows.Forms;
+using SDRSharp.Tetra.MultiChannel;
 
 namespace SDRSharp.Tetra
 {
@@ -7,7 +8,7 @@ namespace SDRSharp.Tetra
     {
         private const string _displayName = "TETRA Demodulator";
         private ISharpControl _controlInterface;
-        private TetraPanel _qpskPanel;
+        private SDRSharp.Tetra.MultiChannel.TetraMultiPanel _qpskPanel;
 
         public UserControl Gui
         {
@@ -23,12 +24,12 @@ namespace SDRSharp.Tetra
         {
             System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
             _controlInterface = control;
-            _qpskPanel = new TetraPanel(_controlInterface);
+            _qpskPanel = new TetraMultiPanel(_controlInterface);
         }
 
         public void Close()
         {
-            _qpskPanel.SaveSettings();
+            _qpskPanel.Shutdown();
         }
 
     }
