@@ -1870,11 +1870,11 @@ private static string GetRoleText(int timeslot, int nCommonSc, bool isActive)
 
             _cmceData.Add(data);
         }
-    }
 
-        // Multi-channel support: feed externally-downconverted IQ into this panel
-        public unsafe void FeedIq(Complex* samples, double samplerate, int length)
-        {
-            IQSamplesAvailable(samples, samplerate, length);
-        }
+    // Multi-channel support: feed externally-downconverted IQ into this panel
+    public unsafe void FeedIq(Complex* samples, double samplerate, int length)
+    {
+        IQSamplesAvailable(samples, samplerate, length);
+    }
+    }
 }
